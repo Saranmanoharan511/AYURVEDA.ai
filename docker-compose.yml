@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ayurveda-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://ayurveda-ai_owner:npg_JCw9D0NiAkjP@ep-little-mode-aea4w3t2.c-2.us-east-2.aws.neon.tech/ayurveda-ai?sslmode=require&channel_binding=require
+      - AWS_REGION=us-east-1
+      - DEBUG=True
+      - ENVIRONMENT=development
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    networks:
+      - ayurveda-network
+
+networks:
+  ayurveda-network:
+    driver: bridge

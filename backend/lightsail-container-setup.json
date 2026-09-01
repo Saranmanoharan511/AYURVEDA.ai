@@ -1,0 +1,38 @@
+{
+  "containerServiceName": "ayurveda-backend",
+  "containers": {
+    "ayurveda-backend": {
+      "image": "ayurveda-backend:latest",
+      "environment": {
+        "DATABASE_URL": "",
+        "AWS_REGION": "us-east-1",
+        "S3_BUCKET_NAME": "",
+        "SQS_DOCUMENT_QUEUE_URL": "",
+        "SQS_EMAIL_QUEUE_URL": "",
+        "COGNITO_USER_POOL_ID": "",
+        "COGNITO_CLIENT_ID": "",
+        "BEDROCK_MODEL_ID": "",
+        "SES_FROM_EMAIL": "",
+        "CLOUDWATCH_LOG_GROUP": "/ayurveda-ai/backend",
+        "ENVIRONMENT": "production",
+        "DEBUG": "false"
+      },
+      "ports": {
+        "8000": "HTTP"
+      }
+    }
+  },
+  "publicEndpoint": {
+    "containerName": "ayurveda-backend",
+    "containerPort": 8000,
+    "healthCheck": {
+      "healthyThreshold": 2,
+      "unhealthyThreshold": 2,
+      "intervalSeconds": 10,
+      "path": "/api/v1/health",
+      "timeoutSeconds": 5
+    }
+  },
+  "power": "nano",
+  "scale": 1
+}
