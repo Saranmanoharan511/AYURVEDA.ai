@@ -14,10 +14,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: List[str] = ["*"]
     
     # Database - Neon PostgreSQL
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql://user:password@localhost:5432/ayurveda_ai"
-    )
+    DATABASE_URL: str
     
     # AWS Configuration
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
@@ -61,7 +58,7 @@ class Settings(BaseSettings):
     CLOUDWATCH_LOG_GROUP: str = os.getenv("CLOUDWATCH_LOG_GROUP", "/ayurveda-ai/backend")
     
     # Security
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+    SECRET_KEY: str
     
     # Rate Limiting Configuration
     RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
@@ -83,7 +80,7 @@ class Settings(BaseSettings):
     SYSTEM_TIMEZONE: str = os.getenv("SYSTEM_TIMEZONE", "Asia/Kolkata")
     
     class Config:
-        env_file = ".env"
+        env_file = os.getenv("ENV_FILE", ".env")
         case_sensitive = True
 
 
