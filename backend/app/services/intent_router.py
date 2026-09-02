@@ -34,15 +34,17 @@ class IntentRouter:
             r"this week",
             r"patient count",
             r"consultation status",
-            r"appointment status"
+            r"appointment status",
+            r"prescription",
+            r"prescriptions",
+            r"medicines",
+            r"medicine"
         ],
         "rag_search": [
             r"what was",
             r"previous",
             r"history",
             r"diagnosis",
-            r"medicines",
-            r"prescription",
             r"treatment",
             r"blood test",
             r"report",

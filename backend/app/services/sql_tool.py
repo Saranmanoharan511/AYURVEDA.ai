@@ -503,6 +503,15 @@ Few-Shot Examples:
 - User: "Show me today's consultations"
   SQL: SELECT c.id, p.full_name, c.reason, c.consultation_status FROM consultations c JOIN patients p ON c.patient_id = p.id WHERE DATE(c.created_at) = CURRENT_DATE ORDER BY c.created_at;
 
+- User: "Get the prescriptions list for patient Saran M"
+  SQL: SELECT pr.name, pr.morning_dosage, pr.afternoon_dosage, pr.night_dosage, pr.food_timing, pr.notes, pr.created_at FROM prescriptions pr JOIN patients p ON pr.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY pr.created_at DESC;
+
+- User: "What prescriptions were given to patient Saran M?"
+  SQL: SELECT pr.name, pr.morning_dosage, pr.afternoon_dosage, pr.night_dosage, pr.food_timing, pr.notes, pr.created_at, c.reason AS consultation_reason FROM prescriptions pr JOIN consultations c ON pr.consultation_id = c.id JOIN patients p ON pr.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY pr.created_at DESC;
+
+- User: "Show me complete prescription details for patient Saran M"
+  SQL: SELECT pr.id, pr.name, pr.morning_dosage, pr.afternoon_dosage, pr.night_dosage, pr.food_timing, pr.notes, pr.created_at, p.full_name, p.client_id, c.reason AS consultation_reason, c.consultation_status FROM prescriptions pr JOIN patients p ON pr.patient_id = p.id JOIN consultations c ON pr.consultation_id = c.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY pr.created_at DESC;
+
 Generate the SQL query:
 """
         
