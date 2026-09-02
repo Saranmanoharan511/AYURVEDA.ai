@@ -13,6 +13,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from app.schemas.ai import BedrockRequest, BedrockResponse, GuardrailsConfig
+from app.core.config import settings
 
 
 class BedrockService:
@@ -27,8 +28,8 @@ class BedrockService:
     """
     
     def __init__(self):
-        self.region = os.getenv("AWS_REGION", "us-east-1")
-        self.model_id = os.getenv("BEDROCK_MODEL_ID", "us.amazon.nova-micro-v1:0")
+        self.region = settings.AWS_REGION
+        self.model_id = settings.BEDROCK_MODEL_ID
         
         # Initialize Bedrock client
         try:
