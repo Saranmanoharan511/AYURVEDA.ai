@@ -35,17 +35,9 @@ class SQLTool:
     def __init__(self, db: Session):
         self.db = db
         self.bedrock_service = BedrockService()
-        
-        # Database schema information for LLM context
         self.schema_info = self._get_schema_info()
     
     def _get_schema_info(self) -> str:
-        """
-        Get database schema information for LLM context.
-        
-        Returns:
-            String representation of database schema
-        """
         schema = """
 DATABASE SCHEMA:
 
@@ -93,15 +85,6 @@ IMPORTANT RELATIONSHIPS:
         return schema
     
     def execute_query(self, request: SQLToolRequest) -> SQLToolResponse:
-        """
-        Execute a safe SQL query based on the request type.
-        
-        Args:
-            request: SQLToolRequest with query type and parameters
-            
-        Returns:
-            SQLToolResponse with query results
-        """
         start_time = time.time()
         
         try:
@@ -118,7 +101,6 @@ IMPORTANT RELATIONSHIPS:
             elif request.query_type == "patient_search":
                 results = self._search_patients(request)
             elif request.query_type == "llm_generated":
-                # New LLM-generated SQL query
                 results = self._execute_llm_generated_query(request)
             else:
                 raise ValueError(f"Unknown query type: {request.query_type}")
@@ -137,70 +119,42 @@ IMPORTANT RELATIONSHIPS:
             raise Exception(f"SQL Tool execution failed: {str(e)}")
     
     def _get_patient_count(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
-        """Get patient count with optional filters."""
         query = select(func.count(Patient.id))
-        
         if request.doctor_id:
-            # Count patients that have consultations with this doctor
             query = select(func.count(Patient.id.distinct())).join(
                 Consultation, Patient.id == Consultation.patient_id
             ).where(Consultation.doctor_id == request.doctor_id)
-        
         result = self.db.execute(query).scalar()
         return [{"count": result}]
     
     def _get_consultation_status(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
-        """Get consultation status breakdown."""
         query = select(
             Consultation.consultation_status,
             func.count(Consultation.id).label('count')
         )
-        
         if request.doctor_id:
             query = query.where(Consultation.doctor_id == request.doctor_id)
-        
         if request.patient_id:
             query = query.where(Consultation.patient_id == request.patient_id)
-        
         query = query.group_by(Consultation.consultation_status)
-        
         results = self.db.execute(query).all()
-        return [
-            {
-                "status": row.consultation_status,
-                "count": row.count
-            }
-            for row in results
-        ]
+        return [{"status": row.consultation_status, "count": row.count} for row in results]
     
     def _get_appointment_status(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
-        """Get appointment status breakdown."""
         query = select(
             Appointment.status,
             func.count(Appointment.id).label('count')
         )
-        
         if request.doctor_id:
             query = query.join(Consultation).where(Consultation.doctor_id == request.doctor_id)
-        
         if request.patient_id:
             query = query.join(Consultation).where(Consultation.patient_id == request.patient_id)
-        
         query = query.group_by(Appointment.status)
-        
         results = self.db.execute(query).all()
-        return [
-            {
-                "status": row.status,
-                "count": row.count
-            }
-            for row in results
-        ]
+        return [{"status": row.status, "count": row.count} for row in results]
     
     def _get_today_consultations(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
-        """Get consultations scheduled for today."""
         today = datetime.utcnow().date()
-        
         query = select(
             Consultation.id,
             Consultation.reason,
@@ -217,12 +171,9 @@ IMPORTANT RELATIONSHIPS:
         ).where(
             func.date(Appointment.scheduled_date) == today
         )
-        
         if request.doctor_id:
             query = query.where(Consultation.doctor_id == request.doctor_id)
-        
         query = query.order_by(Appointment.scheduled_time)
-        
         results = self.db.execute(query).all()
         return [
             {
@@ -238,10 +189,7 @@ IMPORTANT RELATIONSHIPS:
         ]
     
     def _get_monthly_stats(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
-        """Get monthly consultation statistics."""
-        # Default to last 6 months
         months_back = request.filters.get('months_back', 6) if request.filters else 6
-        
         query = select(
             func.date_trunc('month', Consultation.created_at).label('month'),
             func.count(Consultation.id).label('total_consultations'),
@@ -252,20 +200,16 @@ IMPORTANT RELATIONSHIPS:
                 )
             ).label('completed_consultations')
         )
-        
         if request.doctor_id:
             query = query.where(Consultation.doctor_id == request.doctor_id)
-        
         query = query.where(
             Consultation.created_at >= datetime.utcnow() - timedelta(days=30*months_back)
         )
-        
         query = query.group_by(
             func.date_trunc('month', Consultation.created_at)
         ).order_by(
             func.date_trunc('month', Consultation.created_at)
         )
-        
         results = self.db.execute(query).all()
         return [
             {
@@ -277,12 +221,9 @@ IMPORTANT RELATIONSHIPS:
         ]
     
     def _search_patients(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
-        """Search for patients by name, client_id, or email."""
         search_term = request.filters.get('search_term', '') if request.filters else ''
-        
         if not search_term:
             return []
-        
         query = select(
             Patient.id,
             Patient.client_id,
@@ -292,8 +233,6 @@ IMPORTANT RELATIONSHIPS:
             Patient.city,
             Patient.state
         )
-        
-        # Search by name, client_id, or email
         search_pattern = f"%{search_term}%"
         query = query.where(
             or_(
@@ -302,11 +241,8 @@ IMPORTANT RELATIONSHIPS:
                 Patient.email.ilike(search_pattern)
             )
         )
-        
-        # Limit results
         limit = request.filters.get('limit', 20) if request.filters else 20
         query = query.limit(limit)
-        
         results = self.db.execute(query).all()
         return [
             {
@@ -322,21 +258,10 @@ IMPORTANT RELATIONSHIPS:
         ]
     
     def get_patient_by_client_id(self, client_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Get patient information by client ID.
-        
-        Args:
-            client_id: Public client ID (e.g., AYU-000001)
-            
-        Returns:
-            Patient information dictionary or None
-        """
         query = select(Patient).where(Patient.client_id == client_id)
         result = self.db.execute(query).scalar_one_or_none()
-        
         if not result:
             return None
-        
         return {
             "patient_id": str(result.id),
             "client_id": result.client_id,
@@ -350,16 +275,6 @@ IMPORTANT RELATIONSHIPS:
         }
     
     def get_patient_consultations(self, patient_id: str, doctor_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Get consultation history for a patient.
-        
-        Args:
-            patient_id: Patient internal ID
-            doctor_id: Optional doctor ID for authorization
-            
-        Returns:
-            List of consultation dictionaries
-        """
         query = select(
             Consultation.id,
             Consultation.reason,
@@ -373,12 +288,9 @@ IMPORTANT RELATIONSHIPS:
         ).where(
             Consultation.patient_id == patient_id
         )
-        
         if doctor_id:
             query = query.where(Consultation.doctor_id == doctor_id)
-        
         query = query.order_by(Consultation.created_at.desc())
-        
         results = self.db.execute(query).all()
         return [
             {
@@ -394,49 +306,24 @@ IMPORTANT RELATIONSHIPS:
         ]
     
     def _execute_llm_generated_query(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
-        """
-        Execute an LLM-generated SQL query with safety validation.
-        
-        Args:
-            request: SQLToolRequest with user query in filters
-            
-        Returns:
-            List of dictionaries with query results
-        """
         user_query = request.filters.get('user_query', '') if request.filters else ''
-        
         if not user_query:
             raise ValueError("User query is required for LLM-generated SQL")
         
-        # Generate SQL using LLM
         generated_sql = self._generate_sql_with_llm(user_query, request)
         
-        # Validate the generated SQL for safety
         if not self._validate_sql_safety(generated_sql):
             raise ValueError("Generated SQL failed safety validation")
         
-        # Execute the validated SQL
         return self._execute_safe_sql(generated_sql, request)
     
     def _generate_sql_with_llm(self, user_query: str, request: SQLToolRequest) -> str:
-        """
-        Generate SQL query using LLM based on user question.
-        
-        Args:
-            user_query: Natural language question from user
-            request: SQLToolRequest with context
-            
-        Returns:
-            Generated SQL query string
-        """
         if not self.bedrock_service.is_available():
             raise Exception("Bedrock service is not available for SQL generation")
         
-        # Detect if question is doctor-specific or system-wide
         doctor_specific_keywords = ['my patients', 'i have', 'i treated', 'my consultations', 'my appointments']
         is_doctor_specific = any(keyword in user_query.lower() for keyword in doctor_specific_keywords)
         
-        # Build context for the LLM
         context = f"""
 You are an expert Text-to-SQL assistant for an Ayurveda clinical database management system. 
 Your task is to convert natural language questions into safe, accurate SQL queries based strictly on the provided schema.
@@ -454,6 +341,7 @@ CONTEXT:
 CRITICAL RELATIONSHIP RULES:
 1. Entity-to-Foreign Key Mapping:
    - consultations stores patient_id and doctor_id, NOT names. To query by patient name: JOIN patients ON consultations.patient_id = patients.id
+   - CRITICAL: When a user query asks for details or consultations using a patient's name (e.g., "consultation details of the patient with abc name"), you MUST NOT query the consultations table alone. You MUST join the consultations table with the patients table on consultations.patient_id = patients.id and filter by patients.full_name using ILIKE.
    - To query by doctor name: JOIN doctors ON consultations.doctor_id = doctors.id
    - To get consultation notes: JOIN consultation_notes ON consultations.id = consultation_notes.consultation_id
    - To get prescriptions: JOIN prescriptions ON consultations.id = prescriptions.consultation_id
@@ -485,6 +373,9 @@ Few-Shot Examples:
 - User: "Get the latest consultation details for patient Saran M"
   SQL: SELECT c.id, c.reason, c.description, c.consultation_status, c.created_at, p.full_name FROM consultations c JOIN patients p ON c.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY c.created_at DESC LIMIT 1;
 
+- User: "Give me the consultation details of the patient with abc name"
+  SQL: SELECT c.id, c.reason, c.description, c.consultation_status, c.created_at, p.full_name FROM consultations c JOIN patients p ON c.patient_id = p.id WHERE p.full_name ILIKE '%abc%';
+
 - User: "Show me consultation notes for patient Saran M"
   SQL: SELECT cn.diagnosis, cn.ayurvedic_assessment, cn.medicines, cn.lifestyle_advice, cn.diet_plan FROM consultation_notes cn JOIN consultations c ON cn.consultation_id = c.id JOIN patients p ON c.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY cn.created_at DESC LIMIT 1;
 
@@ -493,24 +384,6 @@ Few-Shot Examples:
 
 - User: "How many patients have I treated?"
   SQL: SELECT COUNT(DISTINCT c.patient_id) FROM consultations c WHERE c.doctor_id = 'provided-doctor-id';
-
-- User: "Show me all documents for patient AYU-000001"
-  SQL: SELECT pd.document_type, pd.original_filename, pd.upload_status, pd.processing_status FROM patient_documents pd JOIN patients p ON pd.patient_id = p.id WHERE p.client_id = 'AYU-000001' ORDER BY pd.created_at DESC;
-
-- User: "Show me reports generated for patient Saran M"
-  SQL: SELECT r.report_type, r.original_filename, r.upload_status FROM reports r JOIN consultations c ON r.consultation_id = c.id JOIN patients p ON r.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY r.uploaded_at DESC;
-
-- User: "Show me today's consultations"
-  SQL: SELECT c.id, p.full_name, c.reason, c.consultation_status FROM consultations c JOIN patients p ON c.patient_id = p.id WHERE DATE(c.created_at) = CURRENT_DATE ORDER BY c.created_at;
-
-- User: "Get the prescriptions list for patient Saran M"
-  SQL: SELECT pr.name, pr.morning_dosage, pr.afternoon_dosage, pr.night_dosage, pr.food_timing, pr.notes, pr.created_at FROM prescriptions pr JOIN patients p ON pr.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY pr.created_at DESC;
-
-- User: "What prescriptions were given to patient Saran M?"
-  SQL: SELECT pr.name, pr.morning_dosage, pr.afternoon_dosage, pr.night_dosage, pr.food_timing, pr.notes, pr.created_at, c.reason AS consultation_reason FROM prescriptions pr JOIN consultations c ON pr.consultation_id = c.id JOIN patients p ON pr.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY pr.created_at DESC;
-
-- User: "Show me complete prescription details for patient Saran M"
-  SQL: SELECT pr.id, pr.name, pr.morning_dosage, pr.afternoon_dosage, pr.night_dosage, pr.food_timing, pr.notes, pr.created_at, p.full_name, p.client_id, c.reason AS consultation_reason, c.consultation_status FROM prescriptions pr JOIN patients p ON pr.patient_id = p.id JOIN consultations c ON pr.consultation_id = c.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY pr.created_at DESC;
 
 Generate the SQL query:
 """
@@ -521,17 +394,13 @@ Generate the SQL query:
             prompt=context,
             model_id=self.bedrock_service.model_id,
             max_tokens=500,
-            temperature=0.1,  # Low temperature for consistent SQL generation
+            temperature=0.1,
             system_prompt="You are a SQL expert. Generate only SQL queries, no explanations."
         )
         
         try:
             response = self.bedrock_service.invoke_model(bedrock_request)
-            
-            # Extract SQL from response
             sql_query = response.text.strip()
-            
-            # Clean up the SQL - remove markdown code blocks if present
             sql_query = re.sub(r'```sql\s*', '', sql_query)
             sql_query = re.sub(r'```\s*', '', sql_query)
             sql_query = sql_query.strip()
@@ -545,66 +414,25 @@ Generate the SQL query:
             raise Exception(f"Failed to generate SQL with LLM: {str(e)}")
     
     def _validate_sql_safety(self, sql_query: str) -> bool:
-        """
-        Validate that the SQL query is safe to execute.
-        
-        Args:
-            sql_query: SQL query string to validate
-            
-        Returns:
-            True if safe, False otherwise
-        """
         sql_lower = sql_query.lower()
-        
-        # Block dangerous keywords
         dangerous_keywords = [
             'drop', 'delete', 'truncate', 'insert', 'update', 
             'alter', 'create', 'grant', 'revoke', 'exec',
             'execute', 'script', 'javascript', '--', '/*', '*/'
         ]
-        
         for keyword in dangerous_keywords:
             if keyword in sql_lower:
                 return False
-        
-        # Must start with SELECT
         if not sql_lower.strip().startswith('select'):
             return False
-        
-        # Check for multiple statements (semicolon separation)
-        if ';' in sql_query[:-1]:  # Allow single trailing semicolon
+        if ';' in sql_query[:-1]:
             return False
-        
-        # Check for function calls that might be dangerous
-        dangerous_functions = [
-            'eval(', 'exec(', 'system(', 'shell('
-        ]
-        
-        for func in dangerous_functions:
-            if func in sql_lower:
-                return False
-        
         return True
     
     def _execute_safe_sql(self, sql_query: str, request: SQLToolRequest) -> List[Dict[str, Any]]:
-        """
-        Execute a validated SQL query safely.
-        
-        Args:
-            sql_query: Validated SQL query string
-            request: SQLToolRequest with context
-            
-        Returns:
-            List of dictionaries with query results
-        """
         try:
-            # Execute the query using SQLAlchemy text() for safety
             result = self.db.execute(text(sql_query))
-            
-            # Fetch all results
             rows = result.fetchall()
-            
-            # Get column names from result
             if rows:
                 column_names = list(result.keys())
                 results = [
@@ -614,9 +442,7 @@ Generate the SQL query:
                 ]
             else:
                 results = []
-            
             return results
-            
         except SQLAlchemyError as e:
             raise Exception(f"SQL execution failed: {str(e)}")
         except Exception as e:
