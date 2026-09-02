@@ -49,63 +49,27 @@ class SQLTool:
         schema = """
 DATABASE SCHEMA:
 
-Table: patients
-- id (UUID, primary key)
-- client_id (String, e.g., 'AYU-000001')
-- user_id (UUID, foreign key to users)
-- cognito_sub (String)
-- full_name (String)
-- date_of_birth (Date)
-- age (Integer)
-- gender (String)
-- phone (String)
-- email (String)
-- city (String)
-- state (String)
-- created_at (DateTime)
-- updated_at (DateTime)
+Authentication & Users:
+- users (id, cognito_sub, email, role, status, given_name, family_name, created_at, updated_at)
 
-Table: doctors
-- id (UUID, primary key)
-- user_id (UUID, foreign key to users)
-- cognito_sub (String)
-- name (String)
-- qualifications (Text)
-- specialization (String)
-- status (String)
-- created_at (DateTime)
-- updated_at (DateTime)
+Clinical Core:
+- patients (id, client_id, user_id, cognito_sub, full_name, email, phone, date_of_birth, age, gender, city, state, created_at, updated_at)
+- doctors (id, user_id, cognito_sub, name, qualifications, specialization, status, created_at, updated_at)
 
-Table: consultations
-- id (UUID, primary key)
-- patient_id (UUID, foreign key to patients)
-- doctor_id (UUID, foreign key to doctors)
-- reason (String)
-- description (Text)
-- consultation_status (String) - values: 'APPOINTMENT_BOOKED', 'WAITING_FOR_MEETING_SCHEDULE', 'MEETING_SCHEDULED', 'WAITING_FOR_CONSULTATION', 'CONSULTATION_COMPLETED', 'WAITING_FOR_DOCTOR_REPORT', 'REPORT_UPLOADED', 'REPORT_SENT', 'CONSULTATION_CLOSED'
-- started_at (DateTime)
-- completed_at (DateTime)
-- created_at (DateTime)
-- updated_at (DateTime)
+Consultation System:
+- consultations (id, patient_id->patients.id, doctor_id->doctors.id, reason, description, consultation_status, started_at, completed_at, created_at, updated_at)
+- appointments (id, consultation_id->consultations.id, scheduled_date, scheduled_time, timezone, zoom_meeting_url, status, created_at, updated_at)
+- consultation_notes (id, consultation_id->consultations.id, doctor_id->doctors.id, diagnosis, ayurvedic_assessment, medicines, lifestyle_advice, diet_plan, follow_up_instructions, created_at, updated_at)
 
-Table: appointments
-- id (UUID, primary key)
-- consultation_id (UUID, foreign key to consultations)
-- scheduled_date (Date)
-- scheduled_time (Time)
-- timezone (String)
-- zoom_meeting_url (String)
-- status (String)
-- created_at (DateTime)
-- updated_at (DateTime)
+Treatment & Prescriptions:
+- prescriptions (id, consultation_id->consultations.id, patient_id->patients.id, doctor_id->doctors.id, name, morning_dosage, afternoon_dosage, night_dosage, food_timing, notes, created_at, updated_at)
 
-Table: consultation_notes
-- id (UUID, primary key)
-- consultation_id (UUID, foreign key to consultations)
-- doctor_notes (Text)
-- patient_summary (Text)
-- created_at (DateTime)
-- updated_at (DateTime)
+Document Management:
+- patient_documents (id, patient_id->patients.id, consultation_id->consultations.id, uploaded_by->users.id, document_type, s3_object_key, original_filename, content_type, file_size, upload_status, processing_status, document_metadata, created_at, updated_at)
+- reports (id, consultation_id->consultations.id, patient_id->patients.id, uploaded_by->users.id, report_type, s3_object_key, original_filename, content_type, file_size, upload_status, processing_status, uploaded_at)
+
+System:
+- notifications (id, user_id->users.id, event_type, channel, status, message, created_at, sent_at)
 
 IMPORTANT RELATIONSHIPS:
 - patients.user_id -> users.id
@@ -114,6 +78,17 @@ IMPORTANT RELATIONSHIPS:
 - consultations.doctor_id -> doctors.id
 - appointments.consultation_id -> consultations.id
 - consultation_notes.consultation_id -> consultations.id
+- consultation_notes.doctor_id -> doctors.id
+- prescriptions.consultation_id -> consultations.id
+- prescriptions.patient_id -> patients.id
+- prescriptions.doctor_id -> doctors.id
+- patient_documents.patient_id -> patients.id
+- patient_documents.consultation_id -> consultations.id
+- patient_documents.uploaded_by -> users.id
+- reports.consultation_id -> consultations.id
+- reports.patient_id -> patients.id
+- reports.uploaded_by -> users.id
+- notifications.user_id -> users.id
 """
         return schema
     
@@ -463,7 +438,8 @@ IMPORTANT RELATIONSHIPS:
         
         # Build context for the LLM
         context = f"""
-You are a SQL expert for an Ayurveda medical database. Generate a SQL query to answer the user's question.
+You are an expert Text-to-SQL assistant for an Ayurveda clinical database management system. 
+Your task is to convert natural language questions into safe, accurate SQL queries based strictly on the provided schema.
 
 DATABASE SCHEMA:
 {self.schema_info}
@@ -475,18 +451,57 @@ CONTEXT:
 - Patient ID: {request.patient_id if request.patient_id else 'Not specified'}
 - Question Type: {'Doctor-specific (filter by doctor_id)' if is_doctor_specific and request.doctor_id else 'System-wide (no doctor filtering)'}
 
-IMPORTANT RULES:
-1. Generate ONLY SELECT queries - no INSERT, UPDATE, DELETE, DROP, TRUNCATE, etc.
-2. Apply doctor_id filtering ONLY for doctor-specific questions:
-   - If the question asks about "my patients", "I have", "I treated", etc., AND doctor_id is provided, include WHERE doctor_id = '{request.doctor_id}'
-   - If the question is about the system overall ("in our system", "total patients", "all patients", etc.), DO NOT filter by doctor_id
-   - If patient_id is provided and the question is about a specific patient, filter by that patient_id
-3. Use proper JOIN syntax when accessing related tables
-4. Return only the SQL query, no explanations
-5. Use PostgreSQL syntax
-6. Limit results to avoid excessive data (use LIMIT 100)
-7. Handle dates properly (use proper date functions)
-8. Use proper column names from the schema above
+CRITICAL RELATIONSHIP RULES:
+1. Entity-to-Foreign Key Mapping:
+   - consultations stores patient_id and doctor_id, NOT names. To query by patient name: JOIN patients ON consultations.patient_id = patients.id
+   - To query by doctor name: JOIN doctors ON consultations.doctor_id = doctors.id
+   - To get consultation notes: JOIN consultation_notes ON consultations.id = consultation_notes.consultation_id
+   - To get prescriptions: JOIN prescriptions ON consultations.id = prescriptions.consultation_id
+   - To get documents: JOIN patient_documents ON patients.id = patient_documents.patient_id
+   - To get reports: JOIN reports ON consultations.id = reports.consultation_id
+
+2. Text Matching:
+   - Use case-insensitive partial matching for names: WHERE patients.full_name ILIKE '%Saran M%'
+   - Use exact matching for client_id: WHERE patients.client_id = 'AYU-000001'
+   - Use exact matching for consultation_status: WHERE consultations.consultation_status = 'CONSULTATION_COMPLETED'
+
+3. Authorization Filtering:
+   - System-wide questions: No doctor_id filtering
+   - Doctor-specific questions: Filter by doctor_id when question contains "my patients", "I treated", "my consultations"
+
+4. Output Format:
+   - Return ONLY the valid SQL query string
+   - Use PostgreSQL syntax
+   - Add LIMIT 100 to prevent excessive results
+   - Use proper table aliases for readability
+
+Few-Shot Examples:
+- User: "How many patients are registered in our system?"
+  SQL: SELECT COUNT(*) FROM patients;
+
+- User: "List the names of registered patients"
+  SQL: SELECT full_name, client_id, city FROM patients ORDER BY created_at DESC LIMIT 100;
+
+- User: "Get the latest consultation details for patient Saran M"
+  SQL: SELECT c.id, c.reason, c.description, c.consultation_status, c.created_at, p.full_name FROM consultations c JOIN patients p ON c.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY c.created_at DESC LIMIT 1;
+
+- User: "Show me consultation notes for patient Saran M"
+  SQL: SELECT cn.diagnosis, cn.ayurvedic_assessment, cn.medicines, cn.lifestyle_advice, cn.diet_plan FROM consultation_notes cn JOIN consultations c ON cn.consultation_id = c.id JOIN patients p ON c.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY cn.created_at DESC LIMIT 1;
+
+- User: "What prescriptions were given to patient Saran M?"
+  SQL: SELECT pr.name, pr.morning_dosage, pr.afternoon_dosage, pr.night_dosage, pr.food_timing, pr.notes FROM prescriptions pr JOIN consultations c ON pr.consultation_id = c.id JOIN patients p ON pr.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY pr.created_at DESC;
+
+- User: "How many patients have I treated?"
+  SQL: SELECT COUNT(DISTINCT c.patient_id) FROM consultations c WHERE c.doctor_id = 'provided-doctor-id';
+
+- User: "Show me all documents for patient AYU-000001"
+  SQL: SELECT pd.document_type, pd.original_filename, pd.upload_status, pd.processing_status FROM patient_documents pd JOIN patients p ON pd.patient_id = p.id WHERE p.client_id = 'AYU-000001' ORDER BY pd.created_at DESC;
+
+- User: "Show me reports generated for patient Saran M"
+  SQL: SELECT r.report_type, r.original_filename, r.upload_status FROM reports r JOIN consultations c ON r.consultation_id = c.id JOIN patients p ON r.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY r.uploaded_at DESC;
+
+- User: "Show me today's consultations"
+  SQL: SELECT c.id, p.full_name, c.reason, c.consultation_status FROM consultations c JOIN patients p ON c.patient_id = p.id WHERE DATE(c.created_at) = CURRENT_DATE ORDER BY c.created_at;
 
 Generate the SQL query:
 """
