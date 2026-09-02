@@ -20,13 +20,13 @@ app = FastAPI(
 # Apply rate limiter to the app
 app.state.limiter = limiter
 
-# Configure CORS
+# Configure CORS for testing/staging - allow all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],  # Allow all origins for testing
+    allow_credentials=True,  # Allow credentials for auth
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 # Add logging middleware
