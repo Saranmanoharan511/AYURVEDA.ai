@@ -339,7 +339,11 @@ class AIOrchestrator:
         # Format SQL results (always LLM-generated now)
         if 'sql' in state.tool_results:
             sql_result = state.tool_results['sql']
-            evidence_parts.append(f"SQL Query Results:\n{json.dumps(sql_result.get('results', []), indent=2)}")
+            results = sql_result.get('results', [])
+            if results:
+                evidence_parts.append(f"ACTUAL DATABASE RESULTS (Use ONLY this data):\n{json.dumps(results, indent=2)}")
+            else:
+                evidence_parts.append("ACTUAL DATABASE RESULTS: NO DATA FOUND - Query returned 0 rows. Do not invent any data.")
         
         # Format RAG results
         if 'rag' in state.tool_results:
