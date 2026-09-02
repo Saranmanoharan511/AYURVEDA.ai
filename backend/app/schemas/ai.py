@@ -60,12 +60,12 @@ class SQLToolRequest(BaseModel):
     """Request schema for SQL Tool."""
     
     query_type: Literal["patient_count", "consultation_status", "appointment_status", 
-                        "today_consultations", "monthly_stats", "patient_search"] = Field(
+                        "today_consultations", "monthly_stats", "patient_search", "llm_generated"] = Field(
         ..., description="Type of SQL query to execute")
     patient_id: Optional[str] = Field(None, description="Patient ID for patient-specific queries")
     doctor_id: Optional[str] = Field(None, description="Doctor ID for doctor-specific queries")
     date_range: Optional[Dict[str, str]] = Field(None, description="Date range for queries (start_date, end_date)")
-    filters: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional filters")
+    filters: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional filters (for llm_generated, include 'user_query')")
 
 
 class SQLToolResponse(BaseModel):

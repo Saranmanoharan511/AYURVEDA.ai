@@ -324,7 +324,8 @@ class IntentRouter:
         if "search" in query_lower or "find" in query_lower:
             return "patient_search"
         
-        return "patient_count"  # Default
+        # For complex queries that don't match predefined patterns, use LLM-generated SQL
+        return "llm_generated"  # Default to LLM-generated for flexibility
     
     def suggest_analytics_type(self, query: str) -> str:
         """

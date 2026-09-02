@@ -6,6 +6,7 @@ This service coordinates the AI tools and Bedrock to answer doctor questions.
 """
 
 import time
+import json
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 
@@ -203,17 +204,24 @@ class AIOrchestrator:
         
         query_type = self.intent_router.suggest_query_type(state.user_query)
         
+        # Prepare filters for LLM-generated queries
+        filters = {}
+        if query_type == "llm_generated":
+            filters['user_query'] = state.user_query
+        
         request = SQLToolRequest(
             query_type=query_type,
             patient_id=state.patient_id,
-            doctor_id=state.context.get('doctor_id')
+            doctor_id=state.context.get('doctor_id'),
+            filters=filters if filters else None
         )
         
         response = self.sql_tool.execute_query(request)
         return {
             "query_type": response.query_type,
             "results": response.results,
-            "row_count": response.row_count
+            "row_count": response.row_count,
+            "execution_time_ms": response.execution_time_ms
         }
     
     def _execute_rag_tool(self, state: OrchestratorState) -> Dict[str, Any]:
@@ -333,7 +341,10 @@ class AIOrchestrator:
         # Format SQL results
         if 'sql' in state.tool_results:
             sql_result = state.tool_results['sql']
-            evidence_parts.append(f"SQL Query Results:\n{sql_result}")
+            if sql_result.get('query_type') == 'llm_generated':
+                evidence_parts.append(f"Dynamic SQL Query Results:\n{json.dumps(sql_result.get('results', []), indent=2)}")
+            else:
+                evidence_parts.append(f"SQL Query Results:\n{json.dumps(sql_result, indent=2)}")
         
         # Format RAG results
         if 'rag' in state.tool_results:

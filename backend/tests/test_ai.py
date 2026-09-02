@@ -45,8 +45,35 @@ class TestSQLTool:
         mock_result.scalar.return_value = 10
         mock_db.execute.return_value = mock_result
         
-        result = sql_tool.execute_query("SELECT COUNT(*) FROM patients")
+        request = SQLToolRequest(query_type="patient_count")
+        result = sql_tool.execute_query(request)
         assert result is not None
+        assert result.row_count == 1
+    
+    def test_llm_generated_query_invalid_sql(self, sql_tool):
+        """Test that invalid SQL is rejected by safety validation."""
+        request = SQLToolRequest(
+            query_type="llm_generated",
+            filters={"user_query": "drop table patients"}
+        )
+        
+        # This should raise an exception due to safety validation
+        with pytest.raises(Exception):
+            sql_tool.execute_query(request)
+    
+    def test_sql_safety_validation(self, sql_tool):
+        """Test SQL safety validation."""
+        # Valid SELECT query
+        assert sql_tool._validate_sql_safety("SELECT * FROM patients")
+        
+        # Invalid DROP query
+        assert not sql_tool._validate_sql_safety("DROP TABLE patients")
+        
+        # Invalid DELETE query
+        assert not sql_tool._validate_sql_safety("DELETE FROM patients")
+        
+        # Invalid INSERT query
+        assert not sql_tool._validate_sql_safety("INSERT INTO patients VALUES (...)")
 
 
 class TestIntentRouter:
