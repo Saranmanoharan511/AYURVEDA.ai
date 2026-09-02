@@ -213,6 +213,7 @@ class OrchestratorState(BaseModel):
     user_query: str = Field(..., description="Original user query")
     patient_id: Optional[str] = Field(None, description="Patient ID from context")
     consultation_id: Optional[str] = Field(None, description="Consultation ID from context")
+    context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional context")
     intent_classification: Optional[IntentClassification] = Field(None, description="Intent classification")
     tool_results: Dict[str, Any] = Field(default_factory=dict, description="Results from tool executions")
     aggregated_evidence: str = Field("", description="Aggregated evidence from tools")
