@@ -111,20 +111,30 @@ class BedrockService:
     
     def _prepare_nova_request(self, request: BedrockRequest) -> Dict[str, Any]:
         """Prepare request body for AWS Nova models."""
-        # AWS Nova models use a Messages API format similar to Claude 3
+        # AWS Nova models use Messages API format with content blocks
         body = {
             "messages": [
                 {
                     "role": "user",
-                    "content": request.prompt
+                    "content": [
+                        {
+                            "text": request.prompt
+                        }
+                    ]
                 }
             ],
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature
+            "inferenceConfig": {
+                "maxTokens": request.max_tokens,
+                "temperature": request.temperature
+            }
         }
         
         if request.system_prompt:
-            body["system"] = request.system_prompt
+            body["system"] = [
+                {
+                    "text": request.system_prompt
+                }
+            ]
         
         return body
     
@@ -161,7 +171,7 @@ class BedrockService:
         
         return body
     
-    def _prepare_titan_request(self, BedrockRequest: BedrockRequest) -> Dict[str, Any]:
+    def _prepare_titan_request(self, request: BedrockRequest) -> Dict[str, Any]:
         """Prepare request body for Titan models."""
         body = {
             "inputText": request.prompt,
@@ -208,8 +218,15 @@ class BedrockService:
         start_time = time.time()
         
         try:
-            # Prepare the request body
-            body = self._prepare_claude_request(request)
+            # Prepare the request body based on model type
+            if "nova" in request.model_id.lower():
+                body = self._prepare_nova_request(request)
+            elif "claude" in request.model_id.lower():
+                body = self._prepare_claude_request(request)
+            elif "titan" in request.model_id.lower():
+                body = self._prepare_titan_request(request)
+            else:
+                body = self._prepare_generic_request(request)
             
             # Invoke with guardrails
             response = self.client.invoke_model(
@@ -235,6 +252,8 @@ class BedrockService:
             elif "claude" in request.model_id.lower():
                 # Older Claude uses legacy completion format
                 text = response_body.get("completion", "")
+            elif "titan" in request.model_id.lower():
+                text = response_body.get("results", [{}])[0].get("outputText", "")
             else:
                 text = response_body.get("completion", "")
             
