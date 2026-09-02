@@ -299,33 +299,16 @@ class IntentRouter:
         """
         Suggest the most appropriate query type for the SQL tool.
         
+        Now always uses LLM-generated SQL for maximum flexibility.
+        
         Args:
             query: User query
             
         Returns:
-            Suggested query type string
+            Always returns "llm_generated" for LLM-based SQL generation
         """
-        query_lower = query.lower()
-        
-        if "how many" in query_lower or "count" in query_lower:
-            if "patient" in query_lower:
-                return "patient_count"
-            elif "consultation" in query_lower:
-                return "consultation_status"
-            elif "appointment" in query_lower:
-                return "appointment_status"
-        
-        if "today" in query_lower:
-            return "today_consultations"
-        
-        if "month" in query_lower or "monthly" in query_lower:
-            return "monthly_stats"
-        
-        if "search" in query_lower or "find" in query_lower:
-            return "patient_search"
-        
-        # For complex queries that don't match predefined patterns, use LLM-generated SQL
-        return "llm_generated"  # Default to LLM-generated for flexibility
+        # Always use LLM-generated SQL for all queries
+        return "llm_generated"
     
     def suggest_analytics_type(self, query: str) -> str:
         """

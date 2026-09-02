@@ -125,16 +125,16 @@ class TestIntentRouter:
         assert client_id is None
     
     def test_suggest_query_type_patient_count(self):
-        """Test suggesting query type for patient count."""
+        """Test suggesting query type for patient count (always LLM-generated)."""
         router = IntentRouter()
         query_type = router.suggest_query_type("How many patients do I have?")
-        assert query_type == "patient_count"
+        assert query_type == "llm_generated"
     
     def test_suggest_query_type_today_consultations(self):
-        """Test suggesting query type for today's consultations."""
+        """Test suggesting query type for today's consultations (always LLM-generated)."""
         router = IntentRouter()
         query_type = router.suggest_query_type("Show me today's consultations")
-        assert query_type == "today_consultations"
+        assert query_type == "llm_generated"
     
     def test_suggest_analytics_type_monthly(self):
         """Test suggesting analytics type for monthly stats."""

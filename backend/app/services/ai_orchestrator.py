@@ -199,21 +199,19 @@ class AIOrchestrator:
         return state
     
     def _execute_sql_tool(self, state: OrchestratorState) -> Dict[str, Any]:
-        """Execute SQL tool based on query type."""
+        """Execute SQL tool using LLM-generated SQL."""
         from app.schemas.ai import SQLToolRequest
         
         query_type = self.intent_router.suggest_query_type(state.user_query)
         
-        # Prepare filters for LLM-generated queries
-        filters = {}
-        if query_type == "llm_generated":
-            filters['user_query'] = state.user_query
+        # Always use LLM-generated SQL
+        filters = {'user_query': state.user_query}
         
         request = SQLToolRequest(
             query_type=query_type,
             patient_id=state.patient_id,
             doctor_id=state.context.get('doctor_id'),
-            filters=filters if filters else None
+            filters=filters
         )
         
         response = self.sql_tool.execute_query(request)
@@ -338,13 +336,10 @@ class AIOrchestrator:
                 if tool_name not in state.tool_results:
                     state.tool_results[tool_name] = tool_result
         
-        # Format SQL results
+        # Format SQL results (always LLM-generated now)
         if 'sql' in state.tool_results:
             sql_result = state.tool_results['sql']
-            if sql_result.get('query_type') == 'llm_generated':
-                evidence_parts.append(f"Dynamic SQL Query Results:\n{json.dumps(sql_result.get('results', []), indent=2)}")
-            else:
-                evidence_parts.append(f"SQL Query Results:\n{json.dumps(sql_result, indent=2)}")
+            evidence_parts.append(f"SQL Query Results:\n{json.dumps(sql_result.get('results', []), indent=2)}")
         
         # Format RAG results
         if 'rag' in state.tool_results:
