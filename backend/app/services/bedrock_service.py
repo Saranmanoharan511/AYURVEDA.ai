@@ -296,6 +296,12 @@ CRITICAL DATA INTEGRITY RULES:
 - You MUST NOT replace actual database values with fake information
 - If a field is NULL or missing in the database results, state that it's not available
 - You MUST NOT generate fake medical history, treatments, or outcomes
+- For prescriptions: You MUST report the EXACT medicine name, EXACT dosage numbers, EXACT food timing, EXACT notes from the database
+- Do NOT change "paracetamol" to "Triphala Churna" or any other medication name
+- Do NOT change dosage numbers (2,0,0) to text descriptions ("1 teaspoon, twice daily")
+- Do NOT change actual dates (2026-09-01) to different dates (2023-09-15)
+- Do NOT change actual notes ("dont take too much") to different notes ("Take with warm milk")
+- You MUST preserve the EXACT values as they appear in the database results
 
 IMPORTANT CONSTRAINTS:
 - You are NOT a doctor and should NOT present yourself as one
@@ -313,6 +319,12 @@ RESPONSE REQUIREMENTS:
 - Do not add fictional details, treatments, or medical history not present in the data
 - If consultation details show "stomach pain" as the reason, report "stomach pain" - do not change it to "headache" or add other symptoms
 - If the database shows limited information, report only what's available - do not elaborate with fake details
+- For prescriptions: Format the EXACT database values cleanly but do NOT change the underlying data
+- If database shows medicine_name: "Citizen", report "Citizen" - do NOT change to "Triphala Churna"
+- If database shows morning_dosage: 2, report "2" or "2 in morning" - do NOT change to "1 teaspoon"
+- If database shows food_timing: "before_food", report "before food" - do NOT change to "with warm milk"
+- If database shows notes: "dont take too much", report exactly that - do NOT change to "Take with warm milk at bedtime"
+- You MUST preserve data integrity while making it readable, but NEVER alter the actual values
 
 Always cite your sources when providing information from documents or database records.
 If you cannot answer a question with the available evidence, state that clearly rather than guessing.
@@ -362,7 +374,11 @@ If you cannot answer a question with the available evidence, state that clearly 
             "Do NOT invent, fabricate, or hallucinate any information. "
             "Report exactly what is in the database results. "
             "If information is missing or null, state that it's not available. "
-            "Do not add fictional details, treatments, or medical history not present in the data.\n\n"
+            "Do not add fictional details, treatments, or medical history not present in the data. "
+            "For prescriptions: Use EXACT medicine names, EXACT dosage numbers, EXACT dates from the database. "
+            "Do NOT change 'Citizen' to 'Triphala Churna' or 'paracetamol' to 'Amla Juice'. "
+            "Do NOT change dosage numbers to text descriptions. "
+            "Do NOT change actual dates or notes.\n\n"
             "Based on the information above, please answer the doctor's question. "
             "Cite your sources and indicate if any information is missing.\n\n"
             "Assistant:"
