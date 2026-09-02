@@ -457,6 +457,10 @@ IMPORTANT RELATIONSHIPS:
         if not self.bedrock_service.is_available():
             raise Exception("Bedrock service is not available for SQL generation")
         
+        # Detect if question is doctor-specific or system-wide
+        doctor_specific_keywords = ['my patients', 'i have', 'i treated', 'my consultations', 'my appointments']
+        is_doctor_specific = any(keyword in user_query.lower() for keyword in doctor_specific_keywords)
+        
         # Build context for the LLM
         context = f"""
 You are a SQL expert for an Ayurveda medical database. Generate a SQL query to answer the user's question.
@@ -469,12 +473,14 @@ USER QUESTION: {user_query}
 CONTEXT:
 - Doctor ID: {request.doctor_id if request.doctor_id else 'Not specified'}
 - Patient ID: {request.patient_id if request.patient_id else 'Not specified'}
+- Question Type: {'Doctor-specific (filter by doctor_id)' if is_doctor_specific and request.doctor_id else 'System-wide (no doctor filtering)'}
 
 IMPORTANT RULES:
 1. Generate ONLY SELECT queries - no INSERT, UPDATE, DELETE, DROP, TRUNCATE, etc.
-2. Always include appropriate WHERE clauses for authorization:
-   - If doctor_id is provided, filter by that doctor_id
-   - If patient_id is provided, filter by that patient_id
+2. Apply doctor_id filtering ONLY for doctor-specific questions:
+   - If the question asks about "my patients", "I have", "I treated", etc., AND doctor_id is provided, include WHERE doctor_id = '{request.doctor_id}'
+   - If the question is about the system overall ("in our system", "total patients", "all patients", etc.), DO NOT filter by doctor_id
+   - If patient_id is provided and the question is about a specific patient, filter by that patient_id
 3. Use proper JOIN syntax when accessing related tables
 4. Return only the SQL query, no explanations
 5. Use PostgreSQL syntax
