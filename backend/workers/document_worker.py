@@ -24,6 +24,7 @@ import time
 import sys
 import os
 import logging
+import gc
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -61,8 +62,9 @@ class DocumentProcessingWorker:
         self.retry_delay = settings.RETRY_DELAY_SECONDS
         self.polling_interval = 20  # seconds
         self.running = False
+        self.embedding_batch_size = 10  # Process embeddings in batches of 10 to reduce memory usage
         
-        logger.info(f"Document Processing Worker initialized - Region: {self.region}, Queue: {self.queue_url}, DLQ: {self.dlq_url}")
+        logger.info(f"Document Processing Worker initialized - Region: {self.region}, Queue: {self.queue_url}, DLQ: {self.dlq_url}, Embedding batch size: {self.embedding_batch_size}")
     
     def start(self):
         """Start the document processing worker."""
@@ -317,43 +319,57 @@ class DocumentProcessingWorker:
                 }
             )
             
+            # Clean up extracted_text from memory after chunking
+            del extracted_text
+            gc.collect()
+            
             logger.info(f"Step 2 complete: Created {len(chunks_data)} chunks")
             
-            # Step 3: Generate embeddings for chunks
-            logger.info("Step 3: Generating embeddings for chunks...")
-            chunk_texts = [chunk['chunk_text'] for chunk in chunks_data]
-            embeddings = embedding_service.generate_embeddings_batch(chunk_texts)
-            
-            successful_embeddings = len([e for e in embeddings if e])
-            logger.info(f"Step 3 complete: Generated {successful_embeddings}/{len(chunks_data)} embeddings")
-            
-            # Step 4: Store chunks in database
-            logger.info("Step 4: Storing chunks in database...")
+            # Step 3: Generate embeddings for chunks in batches
+            logger.info("Step 3: Generating embeddings for chunks in batches...")
             chunks_created = 0
             embeddings_generated = 0
             
-            for i, chunk_data in enumerate(chunks_data):
-                chunk = DocumentChunk(
-                    document_id=document_id,
-                    patient_id=patient_id,
-                    consultation_id=consultation_id,
-                    chunk_index=chunk_data['chunk_index'],
-                    chunk_text=chunk_data['chunk_text'],
-                    embedding=embeddings[i] if embeddings and embeddings[i] else None,
-                    embedding_vector=embeddings[i] if embeddings and embeddings[i] else None,
-                    chunk_metadata=chunk_data.get('metadata'),
-                    source_filename=document.original_filename,
-                    document_type=document_type
-                )
+            # Process embeddings in batches to reduce memory usage
+            for batch_start in range(0, len(chunks_data), self.embedding_batch_size):
+                batch_end = min(batch_start + self.embedding_batch_size, len(chunks_data))
+                batch_chunks = chunks_data[batch_start:batch_end]
                 
-                db.add(chunk)
-                chunks_created += 1
-                if embeddings and embeddings[i]:
-                    embeddings_generated += 1
+                logger.debug(f"Processing embedding batch {batch_start}-{batch_end} ({len(batch_chunks)} chunks)")
+                
+                # Generate embeddings for this batch
+                chunk_texts = [chunk['chunk_text'] for chunk in batch_chunks]
+                batch_embeddings = embedding_service.generate_embeddings_batch(chunk_texts)
+                
+                # Store chunks with embeddings immediately
+                for i, chunk_data in enumerate(batch_chunks):
+                    chunk = DocumentChunk(
+                        document_id=document_id,
+                        patient_id=patient_id,
+                        consultation_id=consultation_id,
+                        chunk_index=chunk_data['chunk_index'],
+                        chunk_text=chunk_data['chunk_text'],
+                        embedding=batch_embeddings[i] if batch_embeddings and batch_embeddings[i] else None,
+                        embedding_vector=batch_embeddings[i] if batch_embeddings and batch_embeddings[i] else None,
+                        chunk_metadata=chunk_data.get('metadata'),
+                        source_filename=document.original_filename,
+                        document_type=document_type
+                    )
+                    
+                    db.add(chunk)
+                    chunks_created += 1
+                    if batch_embeddings and batch_embeddings[i]:
+                        embeddings_generated += 1
+                
+                # Commit this batch to database and free memory
+                db.commit()
+                logger.debug(f"Committed batch {batch_start}-{batch_end}: {len(batch_chunks)} chunks stored")
+                
+                # Clean up batch data from memory
+                del chunk_texts, batch_embeddings, batch_chunks
+                gc.collect()
             
-            db.commit()
-            
-            logger.info(f"Step 4 complete: Stored {chunks_created} chunks with {embeddings_generated} embeddings in database")
+            logger.info(f"Step 3 complete: Generated and stored {embeddings_generated}/{chunks_created} embeddings")
             logger.info(f"Document processing pipeline completed successfully for {document_id}")
             
         except Exception as e:
