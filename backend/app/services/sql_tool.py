@@ -362,6 +362,9 @@ CRITICAL RELATIONSHIP RULES:
    - Use PostgreSQL syntax
    - Add LIMIT 100 to prevent excessive results
    - Use proper table aliases for readability
+5. Zero Fabrication: You must use ONLY the exact data blocks provided under "SQL_TOOL RESULTS" or "TOOL RESULTS". Never invent dates, reasons, descriptions, or statuses.   
+6. If Data is Empty: If the results list is empty or null, state clearly: "No consultation details are present in the database for this query." Do not make up history.
+7. No Pre-trained Assumptions: Ignore any internal knowledge about this patient. Trust only the text provided in the current prompt's results section.
 
 Few-Shot Examples:
 - User: "How many patients are registered in our system?"
@@ -404,6 +407,9 @@ Generate the SQL query:
             sql_query = re.sub(r'```sql\s*', '', sql_query)
             sql_query = re.sub(r'```\s*', '', sql_query)
             sql_query = sql_query.strip()
+
+            # --- LOG THE GENERATED SQL HERE ---
+            print(f"\n[SQL TOOL DEBUG] Generated SQL Query:\n{sql_query}\n")
             
             if not sql_query.lower().startswith('select'):
                 raise ValueError("LLM did not generate a SELECT query")
