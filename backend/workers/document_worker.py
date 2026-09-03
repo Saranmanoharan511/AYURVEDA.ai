@@ -23,6 +23,7 @@ import json
 import time
 import sys
 import os
+import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -40,6 +41,13 @@ from app.models.report import Report
 from app.models.document_chunk import DocumentChunk
 from app.core.config import settings
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 
 class DocumentProcessingWorker:
     """Worker for processing documents asynchronously."""
@@ -53,10 +61,12 @@ class DocumentProcessingWorker:
         self.retry_delay = settings.RETRY_DELAY_SECONDS
         self.polling_interval = 20  # seconds
         self.running = False
+        
+        logger.info(f"Document Processing Worker initialized - Region: {self.region}, Queue: {self.queue_url}, DLQ: {self.dlq_url}")
     
     def start(self):
         """Start the document processing worker."""
-        print("Starting Document Processing Worker...")
+        logger.info("Starting Document Processing Worker...")
         self.running = True
         
         try:
@@ -64,29 +74,32 @@ class DocumentProcessingWorker:
                 self.process_messages()
                 time.sleep(self.polling_interval)
         except KeyboardInterrupt:
-            print("\nShutting down gracefully...")
+            logger.info("Shutting down gracefully...")
             self.running = False
         except Exception as e:
-            print(f"Worker error: {str(e)}")
+            logger.error(f"Worker error: {str(e)}")
             self.running = False
     
     def stop(self):
         """Stop the document processing worker."""
-        print("Stopping Document Processing Worker...")
+        logger.info("Stopping Document Processing Worker...")
         self.running = False
     
     def process_messages(self):
         """Process messages from the SQS document queue."""
         if not settings.SQS_DOCUMENT_QUEUE_URL:
-            print("SQS_DOCUMENT_QUEUE_URL not configured. Skipping message processing.")
+            logger.warning("SQS_DOCUMENT_QUEUE_URL not configured. Skipping message processing.")
             return
         
         try:
+            logger.debug(f"Polling SQS queue for messages (max 10, wait time 20s)")
             messages = sqs_service.receive_messages(
                 queue_url=settings.SQS_DOCUMENT_QUEUE_URL,
                 max_messages=10,
                 wait_time=20
             )
+            
+            logger.info(f"Received {len(messages)} messages from SQS")
             
             for message in messages:
                 try:
@@ -95,7 +108,7 @@ class DocumentProcessingWorker:
                     
                     # Check if max retries exceeded
                     if receive_count >= self.max_retries:
-                        print(f"Message exceeded max retries ({self.max_retries}). Sending to DLQ.")
+                        logger.warning(f"Message exceeded max retries ({self.max_retries}). Sending to DLQ.")
                         sent_to_dlq = self.send_to_dlq(message)
                         # Only delete from main queue if successfully sent to DLQ
                         if sent_to_dlq:
@@ -104,7 +117,7 @@ class DocumentProcessingWorker:
                                 receipt_handle=message['ReceiptHandle']
                             )
                         else:
-                            print("WARNING: Message not sent to DLQ and will remain in queue for manual intervention.")
+                            logger.error("WARNING: Message not sent to DLQ and will remain in queue for manual intervention.")
                         continue
                     
                     # Process the message
@@ -117,7 +130,7 @@ class DocumentProcessingWorker:
                     )
                     
                 except Exception as e:
-                    print(f"Error processing message: {str(e)}")
+                    logger.error(f"Error processing message: {str(e)}")
                     # Change visibility timeout to allow retry after delay
                     try:
                         sqs_service.change_message_visibility(
@@ -126,10 +139,10 @@ class DocumentProcessingWorker:
                             visibility_timeout=self.retry_delay
                         )
                     except Exception as visibility_error:
-                        print(f"Failed to change message visibility: {str(visibility_error)}")
+                        logger.error(f"Failed to change message visibility: {str(visibility_error)}")
                     
         except Exception as e:
-            print(f"Error receiving messages: {str(e)}")
+            logger.error(f"Error receiving messages: {str(e)}")
     
     def send_to_dlq(self, message: Dict[str, Any]) -> bool:
         """Send failed message to dead-letter queue.
@@ -138,7 +151,7 @@ class DocumentProcessingWorker:
             True if message was successfully sent to DLQ, False otherwise
         """
         if not self.dlq_url:
-            print("DLQ URL not configured. Message will remain in main queue for manual intervention.")
+            logger.error("DLQ URL not configured. Message will remain in main queue for manual intervention.")
             return False
         
         try:
@@ -147,10 +160,10 @@ class DocumentProcessingWorker:
                 message_body=message['Body'],
                 message_attributes=message.get('MessageAttributes', {})
             )
-            print(f"Message sent to DLQ successfully")
+            logger.info("Message sent to DLQ successfully")
             return True
         except Exception as e:
-            print(f"Failed to send message to DLQ: {str(e)}")
+            logger.error(f"Failed to send message to DLQ: {str(e)}")
             return False
     
     def is_document_already_processed(self, document_id: str, document_source: str = "patient_document") -> bool:
@@ -166,6 +179,8 @@ class DocumentProcessingWorker:
         """
         db = SessionLocal()
         try:
+            logger.debug(f"Checking if document {document_id} (source: {document_source}) is already processed")
+            
             if document_source == "report":
                 document = db.query(Report).filter(
                     Report.id == document_id
@@ -176,10 +191,14 @@ class DocumentProcessingWorker:
                 ).first()
             
             if not document:
+                logger.debug(f"Document {document_id} not found")
                 return False
             
             # Document is considered processed if status is AVAILABLE_FOR_RAG
-            return document.processing_status == 'AVAILABLE_FOR_RAG'
+            is_processed = document.processing_status == 'AVAILABLE_FOR_RAG'
+            logger.debug(f"Document {document_id} processing status: {document.processing_status}, is_processed: {is_processed}")
+            
+            return is_processed
         finally:
             db.close()
     
@@ -194,17 +213,19 @@ class DocumentProcessingWorker:
             consultation_id = body.get('consultation_id')
             document_source = body.get('document_source', 'patient_document')
             
-            print(f"Processing document: {document_id} (source: {document_source})")
+            logger.info(f"Processing document: {document_id} (source: {document_source}, type: {document_type}, patient: {patient_id})")
             
             # Idempotency check: Skip if document is already processed
             if self.is_document_already_processed(document_id, document_source):
-                print(f"Document {document_id} already processed. Skipping.")
+                logger.info(f"Document {document_id} already processed. Skipping.")
                 return
             
             # Update document status to PROCESSING
+            logger.info(f"Updating document {document_id} status to PROCESSING")
             self.update_document_status(document_id, 'PROCESSING', document_source)
             
             # Process the document
+            logger.info(f"Starting document processing pipeline for {document_id}")
             self.process_document(
                 document_id=document_id,
                 patient_id=patient_id,
@@ -215,12 +236,13 @@ class DocumentProcessingWorker:
             )
             
             # Update document status to AVAILABLE_FOR_RAG
+            logger.info(f"Updating document {document_id} status to AVAILABLE_FOR_RAG")
             self.update_document_status(document_id, 'AVAILABLE_FOR_RAG', document_source)
             
-            print(f"Successfully processed document: {document_id}")
+            logger.info(f"Successfully processed document: {document_id}")
             
         except Exception as e:
-            print(f"Failed to process document: {str(e)}")
+            logger.error(f"Failed to process document: {str(e)}")
             # Update document status to FAILED
             try:
                 body_data = json.loads(message['Body'])
@@ -254,6 +276,8 @@ class DocumentProcessingWorker:
         db = SessionLocal()
         
         try:
+            logger.info(f"Starting document processing pipeline for {document_id}")
+            
             # Get document record based on source
             if document_source == "report":
                 document = db.query(Report).filter(
@@ -265,19 +289,23 @@ class DocumentProcessingWorker:
                 ).first()
             
             if not document:
+                logger.error(f"Document not found: {document_id}")
                 raise ValueError(f"Document not found: {document_id}")
             
+            logger.info(f"Found document record: {document.original_filename}")
+            
             # Step 1: Extract text from document using Textract
-            print(f"Extracting text from document: {s3_object_key}")
+            logger.info(f"Step 1: Extracting text from document: {s3_object_key}")
             extracted_text = self.extract_document_text(s3_object_key)
             
             if not extracted_text:
+                logger.error("Failed to extract text from document")
                 raise ValueError("Failed to extract text from document")
             
-            print(f"Extracted {len(extracted_text)} characters")
+            logger.info(f"Step 1 complete: Extracted {len(extracted_text)} characters from document")
             
             # Step 2: Chunk the extracted text
-            print("Chunking document text...")
+            logger.info("Step 2: Chunking document text...")
             chunks_data = chunking_service.chunk_text(
                 text=extracted_text,
                 metadata={
@@ -289,17 +317,18 @@ class DocumentProcessingWorker:
                 }
             )
             
-            print(f"Created {len(chunks_data)} chunks")
+            logger.info(f"Step 2 complete: Created {len(chunks_data)} chunks")
             
             # Step 3: Generate embeddings for chunks
-            print("Generating embeddings for chunks...")
+            logger.info("Step 3: Generating embeddings for chunks...")
             chunk_texts = [chunk['chunk_text'] for chunk in chunks_data]
             embeddings = embedding_service.generate_embeddings_batch(chunk_texts)
             
-            print(f"Generated {len([e for e in embeddings if e])} embeddings")
+            successful_embeddings = len([e for e in embeddings if e])
+            logger.info(f"Step 3 complete: Generated {successful_embeddings}/{len(chunks_data)} embeddings")
             
             # Step 4: Store chunks in database
-            print("Storing chunks in database...")
+            logger.info("Step 4: Storing chunks in database...")
             chunks_created = 0
             embeddings_generated = 0
             
@@ -324,9 +353,11 @@ class DocumentProcessingWorker:
             
             db.commit()
             
-            print(f"Stored {chunks_created} chunks with {embeddings_generated} embeddings")
+            logger.info(f"Step 4 complete: Stored {chunks_created} chunks with {embeddings_generated} embeddings in database")
+            logger.info(f"Document processing pipeline completed successfully for {document_id}")
             
         except Exception as e:
+            logger.error(f"Document processing failed for {document_id}: {str(e)}")
             db.rollback()
             raise
         finally:
@@ -343,6 +374,7 @@ class DocumentProcessingWorker:
             Extracted text, None if extraction fails
         """
         try:
+            logger.debug(f"Attempting Textract extraction for {s3_object_key}")
             # For text-based PDFs, we might need to download and extract differently
             # For now, use Textract for all documents
             extracted_text = textract_service.extract_text_from_document(
@@ -350,10 +382,13 @@ class DocumentProcessingWorker:
                 s3_object_key=s3_object_key
             )
             
+            if extracted_text:
+                logger.debug(f"Textract extraction successful for {s3_object_key}")
+            
             return extracted_text
             
         except Exception as e:
-            print(f"Textract extraction failed: {str(e)}")
+            logger.warning(f"Textract extraction failed for {s3_object_key}: {str(e)}, trying fallback method")
             # Fallback: try to download and extract text directly
             return self.extract_text_directly(s3_object_key)
     
@@ -369,6 +404,7 @@ class DocumentProcessingWorker:
             Extracted text, None if extraction fails
         """
         try:
+            logger.debug(f"Attempting direct text extraction for {s3_object_key}")
             # Download file from S3
             import tempfile
             import os
@@ -379,6 +415,7 @@ class DocumentProcessingWorker:
                 
             try:
                 # Download from S3
+                logger.debug(f"Downloading {s3_object_key} from S3 to {temp_path}")
                 s3_service.download_file(
                     bucket_name=settings.S3_BUCKET_NAME,
                     object_key=s3_object_key,
@@ -387,12 +424,17 @@ class DocumentProcessingWorker:
                 
                 # Try to extract text based on file type
                 if s3_object_key.lower().endswith('.pdf'):
+                    logger.debug("Extracting text from PDF using local method")
                     extracted_text = self.extract_from_pdf(temp_path)
                 elif s3_object_key.lower().endswith(('.txt', '.md')):
+                    logger.debug("Extracting text from text file")
                     extracted_text = self.extract_from_text_file(temp_path)
                 else:
-                    print(f"Unsupported file type for direct extraction: {s3_object_key}")
+                    logger.error(f"Unsupported file type for direct extraction: {s3_object_key}")
                     return None
+                
+                if extracted_text:
+                    logger.debug(f"Direct extraction successful: {len(extracted_text)} characters extracted")
                 
                 return extracted_text if extracted_text else None
                 
@@ -400,9 +442,10 @@ class DocumentProcessingWorker:
                 # Clean up temporary file
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
+                    logger.debug(f"Cleaned up temporary file: {temp_path}")
                     
         except Exception as e:
-            print(f"Direct text extraction failed: {str(e)}")
+            logger.error(f"Direct text extraction failed for {s3_object_key}: {str(e)}")
             return None
     
     def extract_from_pdf(self, file_path: str) -> Optional[str]:
@@ -419,19 +462,24 @@ class DocumentProcessingWorker:
             try:
                 import PyPDF2
             except ImportError:
-                print("PyPDF2 not installed. Install with: pip install PyPDF2")
+                logger.error("PyPDF2 not installed. Install with: pip install PyPDF2")
                 return None
             
+            logger.debug(f"Extracting text from PDF: {file_path}")
             text = []
             with open(file_path, 'rb') as file:
                 reader = PyPDF2.PdfReader(file)
                 for page in reader.pages:
                     text.append(page.extract_text())
             
-            return '\n'.join(text) if text else None
+            extracted_text = '\n'.join(text) if text else None
+            if extracted_text:
+                logger.debug(f"PDF extraction successful: {len(extracted_text)} characters extracted")
+            
+            return extracted_text
             
         except Exception as e:
-            print(f"PDF extraction failed: {str(e)}")
+            logger.error(f"PDF extraction failed for {file_path}: {str(e)}")
             return None
     
     def extract_from_text_file(self, file_path: str) -> Optional[str]:
@@ -445,18 +493,24 @@ class DocumentProcessingWorker:
             Extracted text, None if extraction fails
         """
         try:
+            logger.debug(f"Extracting text from file: {file_path}")
             with open(file_path, 'r', encoding='utf-8') as file:
-                return file.read()
+                text = file.read()
+                logger.debug(f"Text file extraction successful: {len(text)} characters")
+                return text
         except UnicodeDecodeError:
             # Try with different encoding
             try:
+                logger.debug("UTF-8 decoding failed, trying latin-1 encoding")
                 with open(file_path, 'r', encoding='latin-1') as file:
-                    return file.read()
+                    text = file.read()
+                    logger.debug(f"Text file extraction successful with latin-1: {len(text)} characters")
+                    return text
             except Exception as e:
-                print(f"Text file extraction failed: {str(e)}")
+                logger.error(f"Text file extraction failed for {file_path}: {str(e)}")
                 return None
         except Exception as e:
-            print(f"Text file extraction failed: {str(e)}")
+            logger.error(f"Text file extraction failed for {file_path}: {str(e)}")
             return None
     
     def update_document_status(
@@ -478,6 +532,8 @@ class DocumentProcessingWorker:
         db = SessionLocal()
         
         try:
+            logger.debug(f"Updating document {document_id} status to {status} (source: {document_source})")
+            
             # Get document based on source
             if document_source == "report":
                 document = db.query(Report).filter(
@@ -489,6 +545,7 @@ class DocumentProcessingWorker:
                 ).first()
             
             if document:
+                old_status = document.processing_status
                 document.processing_status = status
                 if error_message:
                     # Store error message in document_metadata if available
@@ -498,26 +555,32 @@ class DocumentProcessingWorker:
                             document.document_metadata = {}
                         document.document_metadata['error_message'] = error_message
                         document.document_metadata['error_timestamp'] = datetime.utcnow().isoformat()
+                        logger.error(f"Document {document_id} error: {error_message}")
                 
                 db.commit()
+                logger.info(f"Document {document_id} status updated: {old_status} -> {status}")
+            else:
+                logger.warning(f"Document {document_id} not found for status update")
                 
         except Exception as e:
             db.rollback()
-            print(f"Failed to update document status: {str(e)}")
+            logger.error(f"Failed to update document status for {document_id}: {str(e)}")
         finally:
             db.close()
 
 
 def main():
     """Main entry point for the document processing worker."""
+    logger.info("Document Processing Worker main entry point called")
     worker = DocumentProcessingWorker()
     
     try:
         worker.start()
     except KeyboardInterrupt:
+        logger.info("Worker interrupted by user")
         worker.stop()
     except Exception as e:
-        print(f"Worker crashed: {str(e)}")
+        logger.error(f"Worker crashed: {str(e)}")
         worker.stop()
 
 

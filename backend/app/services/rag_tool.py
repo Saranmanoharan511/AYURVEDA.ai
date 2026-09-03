@@ -6,11 +6,14 @@ This tool provides semantic search capabilities with strict patient authorizatio
 """
 
 import time
+import logging
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.services.rag_service import RAGService
 from app.schemas.ai import RAGToolRequest, RAGToolResponse
+
+logger = logging.getLogger(__name__)
 
 
 class RAGTool:
@@ -40,6 +43,8 @@ class RAGTool:
         """
         start_time = time.time()
         
+        logger.info(f"RAG Tool retrieve called - Query: '{request.query[:100]}...', Patient ID: {request.patient_id}")
+        
         try:
             # Use the existing RAG service for retrieval
             result = self.rag_service.retrieve_relevant_chunks(
@@ -54,6 +59,8 @@ class RAGTool:
             
             retrieval_time = (time.time() - start_time) * 1000
             
+            logger.info(f"RAG Tool retrieved {len(result.results)} chunks in {retrieval_time:.2f}ms")
+            
             # Format chunks for AI consumption
             formatted_chunks = []
             for chunk_result in result.results:
@@ -67,6 +74,8 @@ class RAGTool:
                     "metadata": chunk_result.metadata
                 })
             
+            logger.debug(f"Formatted {len(formatted_chunks)} chunks for AI consumption")
+            
             return RAGToolResponse(
                 query=request.query,
                 chunks=formatted_chunks,
@@ -76,6 +85,7 @@ class RAGTool:
             
         except Exception as e:
             retrieval_time = (time.time() - start_time) * 1000
+            logger.error(f"RAG Tool retrieval failed after {retrieval_time:.2f}ms: {str(e)}")
             raise Exception(f"RAG Tool retrieval failed: {str(e)}")
     
     def retrieve_by_client_id(self, client_id: str, query: str, top_k: int = 5) -> RAGToolResponse:
@@ -90,13 +100,19 @@ class RAGTool:
         Returns:
             RAGToolResponse with retrieved chunks
         """
+        logger.info(f"RAG Tool retrieve_by_client_id called - Client ID: {client_id}, Query: '{query[:100]}...'")
+        
         # Convert client_id to patient_id using SQL Tool
         from app.services.sql_tool import SQLTool
         sql_tool = SQLTool(self.db)
         
+        logger.debug(f"Converting client_id {client_id} to internal patient_id")
         patient_info = sql_tool.get_patient_by_client_id(client_id)
         if not patient_info:
+            logger.error(f"Patient not found with client_id: {client_id}")
             raise ValueError(f"Patient not found with client_id: {client_id}")
+        
+        logger.debug(f"Client ID {client_id} resolved to patient_id: {patient_info['patient_id']}")
         
         # Create RAG request
         request = RAGToolRequest(
@@ -117,7 +133,10 @@ class RAGTool:
         Returns:
             Formatted chunks string
         """
+        logger.debug(f"Formatting {response.chunk_count} chunks for AI consumption")
+        
         if not response.chunks:
+            logger.debug("No chunks to format")
             return "No relevant document chunks found."
         
         lines = [f"Found {response.chunk_count} relevant document chunks:\n"]
@@ -130,7 +149,10 @@ class RAGTool:
                 lines.append(f"  Consultation: {chunk['consultation_id']}")
             lines.append("")
         
-        return "\n".join(lines)
+        formatted_text = "\n".join(lines)
+        logger.debug(f"Formatted chunks text length: {len(formatted_text)}")
+        
+        return formatted_text
     
     def get_patient_document_summary(self, patient_id: str) -> Dict[str, Any]:
         """
@@ -142,6 +164,8 @@ class RAGTool:
         Returns:
             Dictionary with document summary
         """
+        logger.info(f"Getting patient document summary for patient_id: {patient_id}")
+        
         from app.models.document_chunk import DocumentChunk
         from sqlalchemy import select, func
         
@@ -166,5 +190,7 @@ class RAGTool:
                 for row in results
             ]
         }
+        
+        logger.info(f"Patient document summary: {summary['total_chunks']} total chunks across {len(summary['by_document_type'])} document types")
         
         return summary

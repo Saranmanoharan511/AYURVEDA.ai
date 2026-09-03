@@ -14,6 +14,7 @@ Key Features:
 - Source reference tracking
 """
 
+import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
@@ -21,6 +22,8 @@ from sqlalchemy.sql import text
 from app.services.embedding_service import embedding_service
 from app.models.document_chunk import DocumentChunk
 from app.schemas.document_processing import RAGRetrievalRequest, RAGRetrievalResult, RAGRetrievalResponse
+
+logger = logging.getLogger(__name__)
 
 
 class RAGService:
@@ -57,20 +60,34 @@ class RAGService:
         Raises:
             ValueError: If query is empty or patient_id is not provided
         """
+        logger.info(f"RAG retrieval request - Query: '{query[:100]}...', Patient ID: {patient_id}, Top-K: {top_k}, Min Similarity: {min_similarity}")
+        
+        if consultation_id:
+            logger.debug(f"Filtering by consultation_id: {consultation_id}")
+        if document_type:
+            logger.debug(f"Filtering by document_type: {document_type}")
+        
         if not query or not query.strip():
+            logger.error("Query cannot be empty")
             raise ValueError("Query cannot be empty")
         
         if not patient_id:
+            logger.error("Patient ID is required for authorization")
             raise ValueError("Patient ID is required for authorization")
         
         # Generate embedding for the query
+        logger.debug("Generating query embedding")
         query_embedding = self.embedding_service.generate_embedding(query)
         
         if not query_embedding:
+            logger.error("Failed to generate query embedding")
             raise ValueError("Failed to generate query embedding")
+        
+        logger.debug(f"Query embedding generated with dimensions {len(query_embedding)}")
         
         # Build the base query with patient authorization filter
         # CRITICAL: Always filter by patient_id to prevent cross-patient retrieval
+        logger.debug(f"Building query with patient authorization filter for patient_id: {patient_id}")
         base_query = db.query(DocumentChunk).filter(
             DocumentChunk.patient_id == patient_id
         )
@@ -80,11 +97,13 @@ class RAGService:
             base_query = base_query.filter(
                 DocumentChunk.consultation_id == consultation_id
             )
+            logger.debug(f"Applied consultation_id filter: {consultation_id}")
         
         if document_type:
             base_query = base_query.filter(
                 DocumentChunk.document_type == document_type
             )
+            logger.debug(f"Applied document_type filter: {document_type}")
         
         # Only retrieve chunks that have embeddings
         base_query = base_query.filter(
@@ -95,6 +114,8 @@ class RAGService:
         try:
             # Check if embedding_vector column exists
             db.execute(text("SELECT embedding_vector FROM document_chunks LIMIT 1"))
+            
+            logger.info("Using pgvector similarity search")
             
             # Use pgvector cosine similarity search
             # Convert embedding array to vector format for pgvector
@@ -113,8 +134,12 @@ class RAGService:
             # Filter by minimum similarity
             results = [r for r in results if r.similarity >= min_similarity]
             
-        except Exception:
+            logger.info(f"pgvector search returned {len(results)} results above similarity threshold {min_similarity}")
+            
+        except Exception as e:
             # Fall back to keyword-based retrieval if pgvector not available
+            logger.warning(f"pgvector search failed, falling back to keyword search: {str(e)}")
+            
             keyword_conditions = []
             query_words = query.lower().split()
             for word in query_words:
@@ -132,6 +157,8 @@ class RAGService:
             results = base_query.order_by(
                 DocumentChunk.created_at.desc()
             ).limit(top_k).all()
+            
+            logger.info(f"Keyword search returned {len(results)} results")
         
         # Convert results to RAGRetrievalResult objects
         retrieval_results = []
@@ -171,6 +198,8 @@ class RAGService:
                 document_type=chunk.document_type
             ))
         
+        logger.info(f"RAG retrieval complete: {len(retrieval_results)} chunks retrieved for patient {patient_id}")
+        
         return RAGRetrievalResponse(
             query=query,
             results=retrieval_results,
@@ -200,14 +229,19 @@ class RAGService:
         Returns:
             RAGRetrievalResponse with matching chunks
         """
+        logger.info(f"Keyword retrieval request - Keywords: {keywords}, Patient ID: {patient_id}, Top-K: {top_k}")
+        
         if not keywords:
+            logger.error("Keywords cannot be empty")
             raise ValueError("Keywords cannot be empty")
         
         if not patient_id:
+            logger.error("Patient ID is required for authorization")
             raise ValueError("Patient ID is required for authorization")
         
         # Build query with patient authorization filter
         # CRITICAL: Always filter by patient_id
+        logger.debug(f"Building keyword search query with patient authorization filter for patient_id: {patient_id}")
         base_query = db.query(DocumentChunk).filter(
             DocumentChunk.patient_id == patient_id
         )
@@ -217,11 +251,13 @@ class RAGService:
             base_query = base_query.filter(
                 DocumentChunk.consultation_id == consultation_id
             )
+            logger.debug(f"Applied consultation_id filter: {consultation_id}")
         
         if document_type:
             base_query = base_query.filter(
                 DocumentChunk.document_type == document_type
             )
+            logger.debug(f"Applied document_type filter: {document_type}")
         
         # Add keyword matching using ILIKE (case-insensitive)
         keyword_conditions = []
@@ -239,6 +275,8 @@ class RAGService:
         results = base_query.order_by(
             DocumentChunk.created_at.desc()
         ).limit(top_k).all()
+        
+        logger.info(f"Keyword search returned {len(results)} results")
         
         # Convert results to RAGRetrievalResult objects
         retrieval_results = []
@@ -281,11 +319,15 @@ class RAGService:
         Returns:
             List of document chunks for patient context
         """
+        logger.info(f"Getting patient context - Patient ID: {patient_id}, Consultation ID: {consultation_id}, Limit: {limit}")
+        
         if not patient_id:
+            logger.error("Patient ID is required for authorization")
             raise ValueError("Patient ID is required for authorization")
         
         # Build query with patient authorization filter
         # CRITICAL: Always filter by patient_id
+        logger.debug(f"Building patient context query with patient authorization filter for patient_id: {patient_id}")
         base_query = db.query(DocumentChunk).filter(
             DocumentChunk.patient_id == patient_id
         )
@@ -295,12 +337,15 @@ class RAGService:
             base_query = base_query.filter(
                 DocumentChunk.consultation_id == consultation_id
             )
+            logger.debug(f"Applied consultation_id filter: {consultation_id}")
         
         # Order by document and chunk index
         results = base_query.order_by(
             DocumentChunk.document_id,
             DocumentChunk.chunk_index
         ).limit(limit).all()
+        
+        logger.info(f"Retrieved {len(results)} chunks for patient context")
         
         # Convert to dictionaries
         context = []
@@ -326,14 +371,20 @@ class RAGService:
         Returns:
             True if chunk belongs to patient, False otherwise
         """
+        logger.debug(f"Verifying patient access - Chunk ID: {chunk_id}, Patient ID: {patient_id}")
+        
         chunk = db.query(DocumentChunk).filter(
             DocumentChunk.id == chunk_id
         ).first()
         
         if not chunk:
+            logger.warning(f"Chunk {chunk_id} not found")
             return False
         
-        return str(chunk.patient_id) == patient_id
+        has_access = str(chunk.patient_id) == patient_id
+        logger.debug(f"Patient access verification result: {has_access}")
+        
+        return has_access
 
 
 # Singleton instance
