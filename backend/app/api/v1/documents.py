@@ -14,6 +14,7 @@ from sqlalchemy import or_
 from typing import Optional
 from uuid import UUID
 import os
+import logging
 from datetime import datetime
 
 from app.db.session import get_db
@@ -47,6 +48,7 @@ from app.schemas.document_processing import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/upload-url", response_model=PresignedUploadURLResponse)
@@ -477,6 +479,107 @@ async def get_my_documents(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve documents: {str(e)}"
+        )
+
+
+@router.get("/consultation/{consultation_id}/patient-uploads", response_model=list[PatientDocumentResponse])
+async def get_consultation_patient_uploads(
+    consultation_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all patient uploaded documents for a specific consultation.
+    
+    Patients can only access uploads for their own consultations.
+    Doctors can access uploads for consultations they are assigned to.
+    """
+    try:
+        from app.models.consultation import Consultation
+        from app.models.patient import Patient
+        from app.models.doctor import Doctor
+        
+        # Verify consultation exists
+        consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+        if not consultation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Consultation not found"
+            )
+        
+        # Check authorization
+        if current_user.role == 'patient':
+            patient = db.query(Patient).filter(Patient.user_id == current_user.id).first()
+            if not patient or consultation.patient_id != patient.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to access uploads for this consultation"
+                )
+        elif current_user.role == 'doctor':
+            doctor = db.query(Doctor).filter(Doctor.user_id == current_user.id).first()
+            if not doctor or consultation.doctor_id != doctor.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to access uploads for this consultation"
+                )
+        
+        # Get patient uploaded documents for this consultation
+        documents = db.query(PatientDocument).filter(
+            PatientDocument.consultation_id == consultation_id,
+            PatientDocument.upload_status == 'COMPLETED'
+        ).order_by(PatientDocument.created_at.desc()).all()
+        
+        # Generate download URLs for each document
+        result = []
+        for doc in documents:
+            try:
+                download_url = s3_service.generate_presigned_download_url(
+                    object_key=doc.s3_object_key,
+                    expires_in=3600
+                )
+                result.append(PatientDocumentResponse(
+                    id=doc.id,
+                    patient_id=doc.patient_id,
+                    consultation_id=doc.consultation_id,
+                    document_type=doc.document_type,
+                    s3_object_key=doc.s3_object_key,
+                    original_filename=doc.original_filename,
+                    content_type=doc.content_type,
+                    file_size=doc.file_size,
+                    upload_status=doc.upload_status,
+                    processing_status=doc.processing_status,
+                    uploaded_by=doc.uploaded_by,
+                    created_at=doc.created_at,
+                    updated_at=doc.updated_at,
+                    download_url=download_url
+                ))
+            except Exception as e:
+                logger.error(f"Failed to generate download URL for document {doc.id}: {str(e)}")
+                # Still include document without download URL
+                result.append(PatientDocumentResponse(
+                    id=doc.id,
+                    patient_id=doc.patient_id,
+                    consultation_id=doc.consultation_id,
+                    document_type=doc.document_type,
+                    s3_object_key=doc.s3_object_key,
+                    original_filename=doc.original_filename,
+                    content_type=doc.content_type,
+                    file_size=doc.file_size,
+                    upload_status=doc.upload_status,
+                    processing_status=doc.processing_status,
+                    uploaded_by=doc.uploaded_by,
+                    created_at=doc.created_at,
+                    updated_at=doc.updated_at,
+                    download_url=None
+                ))
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve patient uploads: {str(e)}"
         )
 
 

@@ -20,6 +20,7 @@ function DoctorDashboard() {
   const [activeTab, setActiveTab] = useState('reports');
   const [reports, setReports] = useState([]);
   const [prescriptions, setPrescriptions] = useState([]);
+  const [patientUploads, setPatientUploads] = useState([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
 
   useEffect(() => {
@@ -102,12 +103,14 @@ function DoctorDashboard() {
   const fetchConsultationDocuments = async (consultationId) => {
     try {
       setLoadingDocuments(true);
-      const [reportsResponse, prescriptionsResponse] = await Promise.all([
+      const [reportsResponse, prescriptionsResponse, patientUploadsResponse] = await Promise.all([
         apiClient.get(`/api/v1/clinical/consultations/${consultationId}/reports`),
-        apiClient.get(`/api/v1/clinical/consultations/${consultationId}/prescription-documents`)
+        apiClient.get(`/api/v1/clinical/consultations/${consultationId}/prescription-documents`),
+        apiClient.get(`/api/v1/documents/consultation/${consultationId}/patient-uploads`)
       ]);
       setReports(reportsResponse.data);
       setPrescriptions(prescriptionsResponse.data);
+      setPatientUploads(patientUploadsResponse.data);
     } catch (err) {
       console.error('Error fetching consultation documents:', err);
       alert('Failed to load documents');
@@ -548,6 +551,16 @@ function DoctorDashboard() {
                 >
                   Prescriptions
                 </button>
+                <button
+                  onClick={() => setActiveTab('patient-uploads')}
+                  className={`px-4 py-2 font-medium ${
+                    activeTab === 'patient-uploads'
+                      ? 'text-blue-600 border-b-2 border-blue-600'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  Patient Uploads
+                </button>
               </div>
 
               {/* Tab Content */}
@@ -598,9 +611,36 @@ function DoctorDashboard() {
                                 <p className="font-medium">{doc.original_filename}</p>
                                 <p className="text-sm text-gray-600">Generated on {formatDate(doc.generated_at)}</p>
                               </div>
-                              {doc.download_url && (
+                              <a
+                                href={doc.download_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition text-sm"
+                              >
+                                Download
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'patient-uploads' && (
+                    <div>
+                      {patientUploads.length === 0 ? (
+                        <p className="text-gray-600 text-center py-8">No patient uploaded documents yet.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {patientUploads.map((upload) => (
+                            <div key={upload.id} className="border rounded-lg p-4 flex justify-between items-center">
+                              <div>
+                                <p className="font-medium">{upload.original_filename}</p>
+                                <p className="text-sm text-gray-600">{upload.document_type}</p>
+                              </div>
+                              {upload.download_url && (
                                 <a
-                                  href={doc.download_url}
+                                  href={upload.download_url}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition text-sm"
