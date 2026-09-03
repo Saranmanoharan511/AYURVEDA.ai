@@ -8,7 +8,7 @@ def setup_logging():
     
     # Configure root logger
     logging.basicConfig(
-        level=logging.INFO if settings.DEBUG else logging.WARNING,
+        level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout)
@@ -20,9 +20,10 @@ def setup_logging():
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
     # Disable SQLAlchemy logging
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.ERROR)
+    logging.getLogger('sqlalchemy.pool').setLevel(logging.ERROR)
+    logging.getLogger('sqlalchemy.dialects').setLevel(logging.ERROR)
+    logging.getLogger('sqlalchemy.orm').setLevel(logging.ERROR)
     
     # CloudWatch logging integration
     # This requires AWS credentials and the watchtower package

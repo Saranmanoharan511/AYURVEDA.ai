@@ -8,12 +8,16 @@ This service provides a clean interface for calling Bedrock models.
 import os
 import json
 import time
+import logging
 from typing import Dict, Any, Optional, List
 import boto3
 from botocore.exceptions import ClientError
 
 from app.schemas.ai import BedrockRequest, BedrockResponse, GuardrailsConfig
 from app.core.config import settings
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class BedrockService:
@@ -317,7 +321,6 @@ RESPONSE REQUIREMENTS:
 - Base your response ENTIRELY on the SQL Query Results provided
 - Report the exact values from the database (exact reason, exact description, exact status, exact dates)
 - Do not add fictional details, treatments, or medical history not present in the data
-- If consultation details show "stomach pain" as the reason, report "stomach pain" - do not change it to "headache" or add other symptoms
 - If the database shows limited information, report only what's available - do not elaborate with fake details
 
 Always cite your sources when providing information from documents or database records.
@@ -326,40 +329,46 @@ If you cannot answer a question with the available evidence, state that clearly 
         return system_prompt
     
     def format_prompt_with_context(
-        self, 
-        user_query: str, 
+        self,
+        user_query: str,
         tool_results: Dict[str, Any],
         patient_context: Optional[str] = None
     ) -> str:
         """
         Format a prompt with tool results and context.
-        
+
         Args:
             user_query: Original user query
             tool_results: Results from tool executions
             patient_context: Optional patient context string
-            
+
         Returns:
             Formatted prompt string
         """
+        logger.info(f"[BEDROCK SERVICE] === FORMAT PROMPT WITH CONTEXT START ===")
+        logger.info(f"[BEDROCK SERVICE] User Query: {user_query}")
+
         prompt_parts = [
             f"Human: {user_query}\n\n",
             "Here is the relevant information from the database and documents:\n\n"
         ]
-        
+
         if patient_context:
             prompt_parts.append("PATIENT CONTEXT:\n")
             prompt_parts.append(patient_context)
             prompt_parts.append("\n\n")
-        
+            logger.info(f"[BEDROCK SERVICE] Patient Context included")
+
         for tool_name, result in tool_results.items():
             prompt_parts.append(f"{tool_name.upper()} RESULTS:\n")
             if isinstance(result, dict):
                 prompt_parts.append(json.dumps(result, indent=2))
+                logger.info(f"[BEDROCK SERVICE] {tool_name.upper()} Results: {json.dumps(result, indent=2)}")
             else:
                 prompt_parts.append(str(result))
+                logger.info(f"[BEDROCK SERVICE] {tool_name.upper()} Results: {str(result)}")
             prompt_parts.append("\n\n")
-        
+
         prompt_parts.append(
             "CRITICAL: You MUST use ONLY the data provided above. "
             "Do NOT invent, fabricate, or hallucinate any information. "
@@ -368,8 +377,12 @@ If you cannot answer a question with the available evidence, state that clearly 
             "Cite your sources and indicate if any information is missing.\n\n"
             "Assistant:"
         )
-        
-        return "".join(prompt_parts)
+
+        final_prompt = "".join(prompt_parts)
+        logger.info(f"[BEDROCK SERVICE] === FORMAT PROMPT WITH CONTEXT COMPLETE ===")
+        logger.info(f"[BEDROCK SERVICE] Final Prompt Length: {len(final_prompt)} characters")
+
+        return final_prompt
     
     def is_available(self) -> bool:
         """Check if Bedrock service is available."""

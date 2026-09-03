@@ -6,122 +6,72 @@ This is the routing logic for the AI orchestrator.
 """
 
 import re
+import logging
 from typing import List, Dict, Any, Optional
 from app.schemas.ai import IntentRouterRequest, IntentRouterResponse, IntentClassification
+from app.services.bedrock_service import BedrockService
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class IntentRouter:
     """
     Intent Router for analyzing user queries and selecting tools.
-    
-    This router uses keyword matching and pattern recognition to determine
+
+    This router uses LLM-based intent classification (Bedrock) to determine
     the intent of a user query and suggest appropriate tools to use.
+    Falls back to pattern-based classification if LLM is unavailable.
     """
-    
-    # Keyword patterns for different intents
-    PATTERNS = {
-        "sql_query": [
-            r"how many",
-            r"count of",
-            r"number of",
-            r"total",
-            r"show me.*patients",
-            r"list.*patients",
-            r"waiting for",
-            r"scheduled",
-            r"today",
-            r"this month",
-            r"this week",
-            r"patient count",
-            r"consultation status",
-            r"appointment status",
-            r"prescription",
-            r"prescriptions",
-            r"medicines",
-            r"medicine"
-        ],
-        "rag_search": [
-            r"what was",
-            r"previous",
-            r"history",
-            r"diagnosis",
-            r"treatment",
-            r"blood test",
-            r"report",
-            r"document",
-            r"notes",
-            r"find.*in.*documents",
-            r"search.*documents"
-        ],
-        "analytics": [
-            r"analytics",
-            r"statistics",
-            r"metrics",
-            r"trends",
-            r"common conditions",
-            r"most common",
-            r"treatment trends",
-            r"returning patients",
-            r"city distribution",
-            r"follow up",
-            r"monthly stats",
-            r"performance"
-        ],
-        "patient_context": [
-            r"tell me about",
-            r"patient profile",
-            r"patient information",
-            r"summary of",
-            r"overview of",
-            r"patient.*context",
-            r"holistic view",
-            r"complete picture"
-        ],
-        "general_question": [
-            r"what is",
-            r"how do",
-            r"can you",
-            r"help me",
-            r"explain",
-            r"define"
-        ]
-    }
-    
+
     def __init__(self):
-        pass
+        self.bedrock_service = BedrockService()
     
     def route(self, request: IntentRouterRequest) -> IntentRouterResponse:
         """
         Analyze the user query and determine the intent.
-        
+
         Args:
             request: IntentRouterRequest with user query and context
-            
+
         Returns:
             IntentRouterResponse with classification and execution plan
         """
+        logger.info(f"[INTENT ROUTER] === ROUTE START ===")
+        logger.info(f"[INTENT ROUTER] User Query: {request.query}")
+        logger.info(f"[INTENT ROUTER] Context: {request.context}")
+
         query = request.query.lower()
-        
+
         # Determine primary intent
         primary_intent, confidence, secondary_intents = self._classify_intent(query)
-        
+
+        logger.info(f"[INTENT ROUTER] Primary Intent: {primary_intent}")
+        logger.info(f"[INTENT ROUTER] Confidence: {confidence}")
+        logger.info(f"[INTENT ROUTER] Secondary Intents: {secondary_intents}")
+
         # Build execution plan
         execution_plan = self._build_execution_plan(
-            primary_intent, 
-            secondary_intents, 
+            primary_intent,
+            secondary_intents,
             request.context
         )
-        
+
+        logger.info(f"[INTENT ROUTER] Execution Plan: {execution_plan}")
+
         # Determine if patient context is needed
         requires_patient_context = self._needs_patient_context(query, request.context)
-        
+        logger.info(f"[INTENT ROUTER] Requires Patient Context: {requires_patient_context}")
+
         classification = IntentClassification(
             primary_intent=primary_intent,
             confidence=confidence,
             secondary_intents=secondary_intents,
             suggested_tools=execution_plan
         )
-        
+
+        logger.info(f"[INTENT ROUTER] === ROUTE COMPLETE ===")
+
         return IntentRouterResponse(
             classification=classification,
             execution_plan=execution_plan,
@@ -130,41 +80,140 @@ class IntentRouter:
     
     def _classify_intent(self, query: str) -> tuple:
         """
-        Classify the intent of the query.
-        
+        Classify the intent of the query using LLM.
+
         Args:
             query: Lowercase user query
-            
+
         Returns:
             Tuple of (primary_intent, confidence, secondary_intents)
         """
+        logger.info(f"[INTENT ROUTER] === LLM INTENT CLASSIFICATION START ===")
+
+        # Try LLM-based classification first
+        if self.bedrock_service.is_available():
+            try:
+                primary_intent = self._classify_intent_with_llm(query)
+                logger.info(f"[INTENT ROUTER] LLM classified intent as: {primary_intent}")
+                logger.info(f"[INTENT ROUTER] === LLM INTENT CLASSIFICATION COMPLETE ===")
+                return primary_intent, 0.9, []  # High confidence for LLM classification
+            except Exception as e:
+                logger.warning(f"[INTENT ROUTER] LLM classification failed: {str(e)}, falling back to pattern matching")
+        else:
+            logger.warning(f"[INTENT ROUTER] Bedrock not available, falling back to pattern matching")
+
+        # Fallback to pattern-based classification
+        return self._classify_intent_with_patterns(query)
+
+    def _classify_intent_with_llm(self, query: str) -> str:
+        """
+        Classify intent using LLM (Bedrock).
+
+        Args:
+            query: User query
+
+        Returns:
+            Intent classification string
+        """
+        from app.schemas.ai import BedrockRequest
+
+        logger.info(f"[INTENT ROUTER] Invoking Bedrock for intent classification")
+        logger.info(f"[INTENT ROUTER] Query for classification: {query}")
+
+        prompt = f"""
+You are an intent classifier for an AI medical assistant. Classify the doctor's question into one of these intents:
+
+- sql_query: Questions about database data (patients, consultations, prescriptions, appointments, counts, lists, details, status, history in database)
+- rag_search: Questions about documents, reports, medical history in uploaded files, document content
+- analytics: Questions about statistics, trends, metrics, performance data
+- patient_context: Questions requesting comprehensive patient overview, summary, profile
+- general_question: General medical knowledge, explanations, definitions, how-to questions
+
+Question: "{query}"
+
+Return ONLY the intent name (one of: sql_query, rag_search, analytics, patient_context, general_question). Do not include any explanation.
+"""
+
+        bedrock_request = BedrockRequest(
+            prompt=prompt,
+            model_id=self.bedrock_service.model_id,
+            max_tokens=50,
+            temperature=0.1,
+            system_prompt="You are an intent classifier. Return only the intent name."
+        )
+
+        try:
+            response = self.bedrock_service.invoke_model(bedrock_request)
+            intent = response.text.strip().lower()
+
+            logger.info(f"[INTENT ROUTER] Bedrock raw response: {response.text}")
+            logger.info(f"[INTENT ROUTER] Classified intent: {intent}")
+
+            # Validate the returned intent
+            valid_intents = ["sql_query", "rag_search", "analytics", "patient_context", "general_question"]
+            if intent in valid_intents:
+                return intent
+            else:
+                logger.warning(f"[INTENT ROUTER] LLM returned invalid intent: {intent}, defaulting to general_question")
+                return "general_question"
+
+        except Exception as e:
+            logger.error(f"[INTENT ROUTER] LLM intent classification error: {str(e)}")
+            raise
+
+    def _classify_intent_with_patterns(self, query: str) -> tuple:
+        """
+        Fallback pattern-based intent classification.
+
+        Args:
+            query: Lowercase user query
+
+        Returns:
+            Tuple of (primary_intent, confidence, secondary_intents)
+        """
+        logger.info(f"[INTENT ROUTER] Using fallback pattern-based classification")
+
+        # Simplified fallback patterns
+        fallback_patterns = {
+            "sql_query": [
+                r"how many", r"count", r"number of", r"total", r"list", r"show",
+                r"patient", r"consultation", r"prescription", r"appointment", r"doctor", r"medicine"
+            ],
+            "rag_search": [
+                r"document", r"report", r"file", r"upload", r"search.*document"
+            ],
+            "analytics": [
+                r"analytics", r"statistics", r"metrics", r"trends", r"performance"
+            ],
+            "patient_context": [
+                r"tell me about", r"summary", r"overview", r"profile", r"context"
+            ]
+        }
+
         scores = {}
-        
-        for intent, patterns in self.PATTERNS.items():
+
+        for intent, patterns in fallback_patterns.items():
             score = 0
             for pattern in patterns:
                 if re.search(pattern, query):
                     score += 1
             scores[intent] = score
-        
+
         # Find the highest scoring intent
         if not scores or max(scores.values()) == 0:
+            logger.info(f"[INTENT ROUTER] Pattern matching found no matches, defaulting to general_question")
             return "general_question", 0.5, []
-        
+
         primary_intent = max(scores, key=scores.get)
         max_score = scores[primary_intent]
-        
-        # Calculate confidence (normalized)
-        total_patterns = sum(len(p) for p in self.PATTERNS.values())
+
+        # Calculate confidence
+        total_patterns = sum(len(p) for p in fallback_patterns.values())
         confidence = min(max_score / max(total_patterns * 0.3, 1), 1.0)
-        
-        # Find secondary intents
-        secondary_intents = [
-            intent for intent, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)
-            if intent != primary_intent and score > 0
-        ][:2]
-        
-        return primary_intent, confidence, secondary_intents
+
+        logger.info(f"[INTENT ROUTER] Pattern-based classification result: {primary_intent} (confidence: {confidence})")
+
+        return primary_intent, confidence, []
     
     def _build_execution_plan(self, primary_intent: str, secondary_intents: List[str], context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """

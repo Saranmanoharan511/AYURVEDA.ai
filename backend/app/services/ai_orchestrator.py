@@ -7,6 +7,7 @@ This service coordinates the AI tools and Bedrock to answer doctor questions.
 
 import time
 import json
+import logging
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,9 @@ from app.schemas.ai import (
     OrchestrationRequest, OrchestrationResponse, OrchestratorState,
     ChatRequest, ChatResponse, ToolExecution
 )
+
+# Configure logging
+logger = logging.getLogger(__name__)
 from app.services.intent_router import IntentRouter
 from app.services.sql_tool import SQLTool
 from app.services.patient_context_tool import PatientContextTool
@@ -371,37 +375,45 @@ class AIOrchestrator:
     def _synthesize_response(self, state: OrchestratorState) -> OrchestratorState:
         """
         Synthesize response using Bedrock.
-        
+
         Args:
             state: Current orchestrator state
-            
+
         Returns:
             Updated state with final response
         """
+        logger.info(f"[AI ORCHESTRATOR] === RESPONSE SYNTHESIS START ===")
+        logger.info(f"[AI ORCHESTRATOR] User Query: {state.user_query}")
+
         if not self.bedrock_service.is_available():
             # Fallback to simple response if Bedrock not available
+            logger.warning(f"[AI ORCHESTRATOR] Bedrock not available, using fallback response")
             state.final_response = self._generate_fallback_response(state)
             state.current_step = "response_synthesized"
             return state
-        
+
         from app.schemas.ai import BedrockRequest
-        
+
         # Generate system prompt
         system_prompt = self.bedrock_service.generate_system_prompt(state.context)
-        
+        logger.info(f"[AI ORCHESTRATOR] System Prompt: {system_prompt}")
+
         # Format prompt with context
         patient_context = None
         if 'patient_context' in state.tool_results:
             patient_context = self.patient_context_tool.format_context_for_ai(
                 type('obj', (object,), state.tool_results['patient_context'])
             )
-        
+
         prompt = self.bedrock_service.format_prompt_with_context(
             state.user_query,
             state.tool_results,
             patient_context
         )
-        
+
+        logger.info(f"[AI ORCHESTRATOR] Prompt sent to Bedrock: {prompt}")
+        logger.info(f"[AI ORCHESTRATOR] Tool Results: {json.dumps(state.tool_results, indent=2)}")
+
         # Invoke Bedrock
         bedrock_request = BedrockRequest(
             prompt=prompt,
@@ -410,22 +422,27 @@ class AIOrchestrator:
             temperature=0.7,
             system_prompt=system_prompt
         )
-        
+
         # Check if guardrails configuration is available
         guardrails_config = self.guardrails_service.get_default_config()
         if guardrails_config.guardrail_id and guardrails_config.guardrail_version:
             # Use Bedrock Guardrails for actual AWS guardrail enforcement
+            logger.info(f"[AI ORCHESTRATOR] Using Bedrock Guardrails")
             bedrock_response = self.bedrock_service.invoke_with_guardrails(
                 bedrock_request,
                 guardrails_config
             )
         else:
             # Fall back to regular invocation without guardrails
+            logger.info(f"[AI ORCHESTRATOR] No guardrails configured, using regular invocation")
             bedrock_response = self.bedrock_service.invoke_model(bedrock_request)
-        
+
+        logger.info(f"[AI ORCHESTRATOR] Bedrock Response: {bedrock_response.text}")
         state.final_response = bedrock_response.text
         state.current_step = "response_synthesized"
-        
+
+        logger.info(f"[AI ORCHESTRATOR] === RESPONSE SYNTHESIS COMPLETE ===")
+
         return state
     
     def _generate_fallback_response(self, state: OrchestratorState) -> str:

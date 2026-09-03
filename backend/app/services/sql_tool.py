@@ -8,6 +8,8 @@ Now supports both predefined queries and LLM-generated dynamic SQL queries.
 
 import time
 import re
+import logging
+import json
 from typing import List, Dict, Any, Optional
 from sqlalchemy import text, select, func, and_, or_
 from sqlalchemy.orm import Session
@@ -21,6 +23,9 @@ from app.models.appointment import Appointment
 from app.models.consultation_note import ConsultationNote
 from app.schemas.ai import SQLToolRequest, SQLToolResponse
 from app.services.bedrock_service import BedrockService
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class SQLTool:
@@ -40,6 +45,15 @@ class SQLTool:
     def _get_schema_info(self) -> str:
         schema = """
 DATABASE SCHEMA:
+DATABASE SCHEMA & VIEWS (RECOMMENDED FOR QUERIES):
+
+Optimized Views:
+- v_consultation_master (consultation_id, reason, description, consultation_status, started_at, completed_at, consultation_created_at, patient_id, patient_client_id, patient_name, patient_email, patient_phone, patient_age, patient_gender, patient_city, patient_state, doctor_id, doctor_name, doctor_qualifications, doctor_specialization, appointment_id, scheduled_date, scheduled_time, appointment_status, note_id, diagnosis, ayurvedic_assessment, lifestyle_advice, diet_plan, follow_up_instructions)
+- v_consultation_prescriptions (prescription_id, consultation_id, patient_client_id, patient_name, medicine_name, morning_dosage, afternoon_dosage, night_dosage, food_timing, prescription_notes, prescribed_at)
+- v_patient_documents (document_id, patient_id, patient_client_id, patient_name, consultation_id, document_type, original_filename, content_type, file_size, upload_status, processing_status, uploaded_at)
+- v_consultation_reports (report_id, consultation_id, patient_id, patient_client_id, patient_name, report_type, original_filename, content_type, file_size, upload_status, processing_status, uploaded_at)
+
+Underlying Base Tables (Use only if views do not cover a specific requirement):
 
 Authentication & Users:
 - users (id, cognito_sub, email, role, status, given_name, family_name, created_at, updated_at)
@@ -86,7 +100,13 @@ IMPORTANT RELATIONSHIPS:
     
     def execute_query(self, request: SQLToolRequest) -> SQLToolResponse:
         start_time = time.time()
-        
+
+        logger.info(f"[SQL TOOL] === EXECUTE QUERY START ===")
+        logger.info(f"[SQL TOOL] Query Type: {request.query_type}")
+        logger.info(f"[SQL TOOL] Patient ID: {request.patient_id}")
+        logger.info(f"[SQL TOOL] Doctor ID: {request.doctor_id}")
+        logger.info(f"[SQL TOOL] Filters: {json.dumps(request.filters, indent=2) if request.filters else 'None'}")
+
         try:
             if request.query_type == "patient_count":
                 results = self._get_patient_count(request)
@@ -104,18 +124,24 @@ IMPORTANT RELATIONSHIPS:
                 results = self._execute_llm_generated_query(request)
             else:
                 raise ValueError(f"Unknown query type: {request.query_type}")
-            
+
             execution_time = (time.time() - start_time) * 1000
-            
+
+            logger.info(f"[SQL TOOL] === EXECUTE QUERY COMPLETE ===")
+            logger.info(f"[SQL TOOL] Row Count: {len(results)}")
+            logger.info(f"[SQL TOOL] Execution Time: {execution_time:.2f}ms")
+            logger.info(f"[SQL TOOL] Results: {json.dumps(results, indent=2)}")
+
             return SQLToolResponse(
                 query_type=request.query_type,
                 results=results,
                 row_count=len(results),
                 execution_time_ms=execution_time
             )
-            
+
         except Exception as e:
             execution_time = (time.time() - start_time) * 1000
+            logger.error(f"[SQL TOOL] EXECUTE QUERY FAILED: {str(e)}")
             raise Exception(f"SQL Tool execution failed: {str(e)}")
     
     def _get_patient_count(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
@@ -306,27 +332,42 @@ IMPORTANT RELATIONSHIPS:
         ]
     
     def _execute_llm_generated_query(self, request: SQLToolRequest) -> List[Dict[str, Any]]:
+        logger.info(f"[SQL TOOL] === LLM GENERATED QUERY START ===")
         user_query = request.filters.get('user_query', '') if request.filters else ''
+        logger.info(f"[SQL TOOL] User Query: {user_query}")
+
         if not user_query:
             raise ValueError("User query is required for LLM-generated SQL")
-        
+
         generated_sql = self._generate_sql_with_llm(user_query, request)
-        
+
+        logger.info(f"[SQL TOOL] Generated SQL: {generated_sql}")
+
         if not self._validate_sql_safety(generated_sql):
+            logger.error(f"[SQL TOOL] SQL SAFETY VALIDATION FAILED")
             raise ValueError("Generated SQL failed safety validation")
-        
-        return self._execute_safe_sql(generated_sql, request)
+
+        logger.info(f"[SQL TOOL] SQL SAFETY VALIDATION PASSED")
+        results = self._execute_safe_sql(generated_sql, request)
+        logger.info(f"[SQL TOOL] === LLM GENERATED QUERY COMPLETE ===")
+
+        return results
     
     def _generate_sql_with_llm(self, user_query: str, request: SQLToolRequest) -> str:
+        logger.info(f"[SQL TOOL] === LLM SQL GENERATION START ===")
+        logger.info(f"[SQL TOOL] User Query: {user_query}")
+
         if not self.bedrock_service.is_available():
+            logger.error(f"[SQL TOOL] Bedrock service not available")
             raise Exception("Bedrock service is not available for SQL generation")
-        
+
         doctor_specific_keywords = ['my patients', 'i have', 'i treated', 'my consultations', 'my appointments']
         is_doctor_specific = any(keyword in user_query.lower() for keyword in doctor_specific_keywords)
+        logger.info(f"[SQL TOOL] Is Doctor Specific: {is_doctor_specific}")
         
         context = f"""
 You are an expert Text-to-SQL assistant for an Ayurveda clinical database management system. 
-Your task is to convert natural language questions into safe, accurate SQL queries based strictly on the provided schema.
+Your task is to convert natural language questions into safe, accurate SQL queries using the optimized database views.
 
 DATABASE SCHEMA:
 {self.schema_info}
@@ -336,57 +377,43 @@ USER QUESTION: {user_query}
 CONTEXT:
 - Doctor ID: {request.doctor_id if request.doctor_id else 'Not specified'}
 - Patient ID: {request.patient_id if request.patient_id else 'Not specified'}
-- Question Type: {'Doctor-specific (filter by doctor_id)' if is_doctor_specific and request.doctor_id else 'System-wide (no doctor filtering)'}
 
-CRITICAL RELATIONSHIP RULES:
-1. Entity-to-Foreign Key Mapping:
-   - consultations stores patient_id and doctor_id, NOT names. To query by patient name: JOIN patients ON consultations.patient_id = patients.id
-   - CRITICAL: When a user query asks for details or consultations using a patient's name (e.g., "consultation details of the patient with abc name"), you MUST NOT query the consultations table alone. You MUST join the consultations table with the patients table on consultations.patient_id = patients.id and filter by patients.full_name using ILIKE.
-   - To query by doctor name: JOIN doctors ON consultations.doctor_id = doctors.id
-   - To get consultation notes: JOIN consultation_notes ON consultations.id = consultation_notes.consultation_id
-   - To get prescriptions: JOIN prescriptions ON consultations.id = prescriptions.consultation_id
-   - To get documents: JOIN patient_documents ON patients.id = patient_documents.patient_id
-   - To get reports: JOIN reports ON consultations.id = reports.consultation_id
+CRITICAL RULES FOR TABLE/VIEW USAGE:
+1. **For Basic Patient Information** (name, email, phone, age, gender, city, state, date_of_birth):
+   - Query the `patients` table directly: SELECT id, client_id, full_name, email, phone, age, gender, city, state, date_of_birth FROM patients WHERE client_id = 'AYU-000001'
+   - DO NOT use v_consultation_master for basic patient details - use patients table instead
 
-2. Text Matching:
-   - Use case-insensitive partial matching for names: WHERE patients.full_name ILIKE '%Saran M%'
-   - Use exact matching for client_id: WHERE patients.client_id = 'AYU-000001'
-   - Use exact matching for consultation_status: WHERE consultations.consultation_status = 'CONSULTATION_COMPLETED'
+2. **For Consultation-Related Information** (consultation history, notes, appointments, reasons, descriptions):
+   - Query `v_consultation_master` view: SELECT consultation_id, reason, description, consultation_status, consultation_created_at FROM v_consultation_master WHERE patient_client_id = 'AYU-000001'
 
-3. Authorization Filtering:
-   - System-wide questions: No doctor_id filtering
-   - Doctor-specific questions: Filter by doctor_id when question contains "my patients", "I treated", "my consultations"
+3. **For Prescriptions/Medicines:**
+   - Query `v_consultation_prescriptions` view
 
-4. Output Format:
-   - Return ONLY the valid SQL query string
-   - Use PostgreSQL syntax
-   - Add LIMIT 100 to prevent excessive results
-   - Use proper table aliases for readability
-5. Zero Fabrication: You must use ONLY the exact data blocks provided under "SQL_TOOL RESULTS" or "TOOL RESULTS". Never invent dates, reasons, descriptions, or statuses.   
-6. If Data is Empty: If the results list is empty or null, state clearly: "No consultation details are present in the database for this query." Do not make up history.
-7. No Pre-trained Assumptions: Ignore any internal knowledge about this patient. Trust only the text provided in the current prompt's results section.
+4. **For Uploaded Documents:**
+   - Query `v_patient_documents` view
+
+5. **For Lab/Clinical Reports:**
+   - Query `v_consultation_reports` view
+
+6. **Text Matching:** Use case-insensitive partial matching for names (`patient_name ILIKE '%abc%'`) and exact matching for client IDs (`patient_client_id = 'AYU-000001'`).
+
+7. **Output Format:** Return ONLY the valid SQL query string using PostgreSQL syntax with a `LIMIT 100`.
 
 Few-Shot Examples:
-- User: "How many patients are registered in our system?"
-  SQL: SELECT COUNT(*) FROM patients;
+- User: "Give me the patient details with client id AYU-000001"
+  SQL: SELECT id, client_id, full_name, email, phone, age, gender, city, state, date_of_birth FROM patients WHERE client_id = 'AYU-000001';
 
-- User: "List the names of registered patients"
-  SQL: SELECT full_name, client_id, city FROM patients ORDER BY created_at DESC LIMIT 100;
-
-- User: "Get the latest consultation details for patient Saran M"
-  SQL: SELECT c.id, c.reason, c.description, c.consultation_status, c.created_at, p.full_name FROM consultations c JOIN patients p ON c.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY c.created_at DESC LIMIT 1;
+- User: "List all consultations for patient with client id AYU-000001"
+  SQL: SELECT consultation_id, reason, description, consultation_status, consultation_created_at FROM v_consultation_master WHERE patient_client_id = 'AYU-000001';
 
 - User: "Give me the consultation details of the patient with abc name"
-  SQL: SELECT c.id, c.reason, c.description, c.consultation_status, c.created_at, p.full_name FROM consultations c JOIN patients p ON c.patient_id = p.id WHERE p.full_name ILIKE '%abc%';
-
-- User: "Show me consultation notes for patient Saran M"
-  SQL: SELECT cn.diagnosis, cn.ayurvedic_assessment, cn.medicines, cn.lifestyle_advice, cn.diet_plan FROM consultation_notes cn JOIN consultations c ON cn.consultation_id = c.id JOIN patients p ON c.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY cn.created_at DESC LIMIT 1;
+  SQL: SELECT consultation_id, reason, description, consultation_status, consultation_created_at FROM v_consultation_master WHERE patient_name ILIKE '%abc%';
 
 - User: "What prescriptions were given to patient Saran M?"
-  SQL: SELECT pr.name, pr.morning_dosage, pr.afternoon_dosage, pr.night_dosage, pr.food_timing, pr.notes FROM prescriptions pr JOIN consultations c ON pr.consultation_id = c.id JOIN patients p ON pr.patient_id = p.id WHERE p.full_name ILIKE '%Saran M%' ORDER BY pr.created_at DESC;
+  SQL: SELECT medicine_name, morning_dosage, afternoon_dosage, night_dosage, food_timing, prescription_notes FROM v_consultation_prescriptions WHERE patient_name ILIKE '%Saran M%';
 
-- User: "How many patients have I treated?"
-  SQL: SELECT COUNT(DISTINCT c.patient_id) FROM consultations c WHERE c.doctor_id = 'provided-doctor-id';
+- User: "Show me all documents for patient AYU-000001"
+  SQL: SELECT document_type, original_filename, upload_status FROM v_patient_documents WHERE patient_client_id = 'AYU-000001';
 
 Generate the SQL query:
 """
@@ -402,54 +429,87 @@ Generate the SQL query:
         )
         
         try:
+            logger.info(f"[SQL TOOL] Invoking Bedrock for SQL generation")
             response = self.bedrock_service.invoke_model(bedrock_request)
             sql_query = response.text.strip()
             sql_query = re.sub(r'```sql\s*', '', sql_query)
             sql_query = re.sub(r'```\s*', '', sql_query)
             sql_query = sql_query.strip()
 
-            # --- LOG THE GENERATED SQL HERE ---
-            print(f"\n[SQL TOOL DEBUG] Generated SQL Query:\n{sql_query}\n")
-            
+            logger.info(f"[SQL TOOL] Raw Bedrock Response: {response.text}")
+            logger.info(f"[SQL TOOL] Cleaned SQL Query: {sql_query}")
+
             if not sql_query.lower().startswith('select'):
+                logger.error(f"[SQL TOOL] LLM did not generate a SELECT query")
                 raise ValueError("LLM did not generate a SELECT query")
-            
+
+            logger.info(f"[SQL TOOL] === LLM SQL GENERATION COMPLETE ===")
             return sql_query
-            
+
         except Exception as e:
+            logger.error(f"[SQL TOOL] LLM SQL GENERATION FAILED: {str(e)}")
             raise Exception(f"Failed to generate SQL with LLM: {str(e)}")
     
     def _validate_sql_safety(self, sql_query: str) -> bool:
+        logger.info(f"[SQL TOOL] === SQL SAFETY VALIDATION START ===")
+        logger.info(f"[SQL TOOL] Validating SQL: {sql_query}")
+
         sql_lower = sql_query.lower()
+
+        # Use word-boundary matching to avoid false positives in column names
+        # This prevents matching "script" inside "description" or other column names
         dangerous_keywords = [
-            'drop', 'delete', 'truncate', 'insert', 'update', 
-            'alter', 'create', 'grant', 'revoke', 'exec',
-            'execute', 'script', 'javascript', '--', '/*', '*/'
+            r'\bdrop\b', r'\bdelete\b', r'\btruncate\b', r'\binsert\b', r'\bupdate\b',
+            r'\balter\b', r'\bcreate\b', r'\bgrant\b', r'\brevoke\b', r'\bexec\b',
+            r'\bexecute\b', r'\bscript\b', r'\bjavascript\b', r'--', r'/\*', r'\*/'
         ]
+
         for keyword in dangerous_keywords:
-            if keyword in sql_lower:
+            if re.search(keyword, sql_lower):
+                logger.warning(f"[SQL TOOL] Dangerous keyword detected: {keyword}")
                 return False
+
+        # Ensure it's a SELECT query (allow SELECT as a standalone keyword)
         if not sql_lower.strip().startswith('select'):
+            logger.warning(f"[SQL TOOL] Query does not start with SELECT")
             return False
+
+        # Only reject multiple statements if semicolon is not at the end
         if ';' in sql_query[:-1]:
+            logger.warning(f"[SQL TOOL] Multiple statements detected")
             return False
+
+        logger.info(f"[SQL TOOL] SQL SAFETY VALIDATION PASSED")
         return True
     
     def _execute_safe_sql(self, sql_query: str, request: SQLToolRequest) -> List[Dict[str, Any]]:
+        logger.info(f"[SQL TOOL] === SAFE SQL EXECUTION START ===")
+        logger.info(f"[SQL TOOL] Executing SQL: {sql_query}")
+
         try:
             result = self.db.execute(text(sql_query))
             rows = result.fetchall()
+
+            logger.info(f"[SQL TOOL] Database returned {len(rows)} rows")
+
             if rows:
                 column_names = list(result.keys())
                 results = [
-                    {column_names[i]: str(row[i]) if row[i] is not None else None 
+                    {column_names[i]: str(row[i]) if row[i] is not None else None
                      for i in range(len(column_names))}
                     for row in rows
                 ]
             else:
                 results = []
+                logger.warning(f"[SQL TOOL] Database returned 0 rows - empty result set")
+
+            logger.info(f"[SQL TOOL] Database Results: {json.dumps(results, indent=2)}")
+            logger.info(f"[SQL TOOL] === SAFE SQL EXECUTION COMPLETE ===")
+
             return results
         except SQLAlchemyError as e:
+            logger.error(f"[SQL TOOL] SQL EXECUTION FAILED: {str(e)}")
             raise Exception(f"SQL execution failed: {str(e)}")
         except Exception as e:
+            logger.error(f"[SQL TOOL] UNEXPECTED ERROR DURING SQL EXECUTION: {str(e)}")
             raise Exception(f"Unexpected error during SQL execution: {str(e)}")
