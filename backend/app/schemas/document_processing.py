@@ -151,7 +151,8 @@ class DocumentSearchResponse(BaseModel):
 # Chunking Configuration Schema
 class ChunkingConfig(BaseModel):
     """Schema for document chunking configuration."""
-    chunk_size: int = Field(1000, description="Maximum chunk size in characters")
-    chunk_overlap: int = Field(200, description="Overlap between chunks in characters")
-    min_chunk_size: int = Field(100, description="Minimum chunk size in characters")
+    chunk_size: int = Field(500, description="Maximum chunk size in characters (reduced for memory efficiency)")
+    chunk_overlap: int = Field(50, description="Overlap between chunks in characters (reduced for memory efficiency)")
+    min_chunk_size: int = Field(150, description="Minimum chunk size in characters (increased to reduce number of chunks)")
     preserve_newlines: bool = Field(True, description="Preserve newlines in chunks")
+    max_chunks: int = Field(50, description="Maximum number of chunks to prevent memory issues")

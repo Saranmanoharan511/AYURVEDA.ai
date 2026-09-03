@@ -28,6 +28,12 @@ import gc
 from typing import Optional, Dict, Any
 from datetime import datetime
 
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -65,6 +71,20 @@ class DocumentProcessingWorker:
         self.embedding_batch_size = 10  # Process embeddings in batches of 10 to reduce memory usage
         
         logger.info(f"Document Processing Worker initialized - Region: {self.region}, Queue: {self.queue_url}, DLQ: {self.dlq_url}, Embedding batch size: {self.embedding_batch_size}")
+    
+    def log_memory_usage(self, step: str):
+        """Log current memory usage for debugging."""
+        if not PSUTIL_AVAILABLE:
+            logger.debug(f"Memory profiling skipped (psutil not available) at {step}")
+            return
+        
+        try:
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            memory_mb = memory_info.rss / 1024 / 1024
+            logger.info(f"Memory usage at {step}: {memory_mb:.2f} MB")
+        except Exception as e:
+            logger.debug(f"Could not log memory usage: {str(e)}")
     
     def start(self):
         """Start the document processing worker."""
@@ -295,6 +315,7 @@ class DocumentProcessingWorker:
                 raise ValueError(f"Document not found: {document_id}")
             
             logger.info(f"Found document record: {document.original_filename}")
+            self.log_memory_usage("start")
             
             # Step 1: Extract text from document using Textract
             logger.info(f"Step 1: Extracting text from document: {s3_object_key}")
@@ -305,6 +326,7 @@ class DocumentProcessingWorker:
                 raise ValueError("Failed to extract text from document")
             
             logger.info(f"Step 1 complete: Extracted {len(extracted_text)} characters from document")
+            self.log_memory_usage("after_text_extraction")
             
             # Step 2: Chunk the extracted text
             logger.info("Step 2: Chunking document text...")
@@ -324,6 +346,7 @@ class DocumentProcessingWorker:
             gc.collect()
             
             logger.info(f"Step 2 complete: Created {len(chunks_data)} chunks")
+            self.log_memory_usage("after_chunking")
             
             # Step 3: Generate embeddings for chunks in batches
             logger.info("Step 3: Generating embeddings for chunks in batches...")
@@ -370,6 +393,7 @@ class DocumentProcessingWorker:
                 gc.collect()
             
             logger.info(f"Step 3 complete: Generated and stored {embeddings_generated}/{chunks_created} embeddings")
+            self.log_memory_usage("after_embeddings")
             logger.info(f"Document processing pipeline completed successfully for {document_id}")
             
         except Exception as e:
