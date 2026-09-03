@@ -190,6 +190,38 @@ class S3Service:
             return response['Body'].read()
         except Exception as e:
             raise Exception(f"Failed to download file: {str(e)}")
+    
+    def download_file_to_path(
+        self,
+        object_key: str,
+        file_path: str
+    ) -> bool:
+        """
+        Download a file from S3 to a local file path.
+        
+        Args:
+            object_key: The key (path) of the file in S3
+            file_path: Local file path to save the downloaded file
+            
+        Returns:
+            True if successful
+            
+        Raises:
+            ValueError: If bucket name is not configured
+        """
+        if not self.bucket_name:
+            raise ValueError("S3_BUCKET_NAME not configured")
+        
+        try:
+            response = self.s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=object_key
+            )
+            with open(file_path, 'wb') as file:
+                file.write(response['Body'].read())
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to download file to path: {str(e)}")
 
 
 # Singleton instance

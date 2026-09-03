@@ -416,8 +416,7 @@ class DocumentProcessingWorker:
             try:
                 # Download from S3
                 logger.debug(f"Downloading {s3_object_key} from S3 to {temp_path}")
-                s3_service.download_file(
-                    bucket_name=settings.S3_BUCKET_NAME,
+                s3_service.download_file_to_path(
                     object_key=s3_object_key,
                     file_path=temp_path
                 )
