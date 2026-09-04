@@ -68,7 +68,7 @@ class DocumentProcessingWorker:
         self.retry_delay = settings.RETRY_DELAY_SECONDS
         self.polling_interval = 20  # seconds
         self.running = False
-        self.embedding_batch_size = 10  # Process embeddings in batches of 10 to reduce memory usage
+        self.embedding_batch_size = 7  # Process embeddings in batches of 7 to reduce memory usage
         
         logger.info(f"Document Processing Worker initialized - Region: {self.region}, Queue: {self.queue_url}, DLQ: {self.dlq_url}, Embedding batch size: {self.embedding_batch_size}")
     
@@ -386,6 +386,7 @@ class DocumentProcessingWorker:
                 
                 # Commit this batch to database and free memory
                 db.commit()
+                db.expire_all()
                 logger.debug(f"Committed batch {batch_start}-{batch_end}: {len(batch_chunks)} chunks stored")
                 
                 # Clean up batch data from memory
