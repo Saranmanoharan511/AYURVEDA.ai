@@ -289,6 +289,7 @@ class PrescriptionDocumentResponse(PrescriptionDocumentBase):
     """Schema for prescription document response."""
     id: UUID
     generated_at: datetime
+    download_url: Optional[str] = None
 
     class Config:
         from_attributes = True

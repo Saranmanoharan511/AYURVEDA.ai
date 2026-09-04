@@ -514,9 +514,10 @@ async def get_consultation_patient_uploads(
                     detail="Not authorized to access uploads for this consultation"
                 )
         
-        # Get patient uploaded documents for this consultation
+        # Get all patient uploaded documents for this patient (not specific to consultation)
+        # For patient dashboard, show all patient uploads across all consultations
         documents = db.query(PatientDocument).filter(
-            PatientDocument.consultation_id == consultation_id,
+            PatientDocument.patient_id == consultation.patient_id,
             PatientDocument.upload_status == 'COMPLETED'
         ).order_by(PatientDocument.created_at.desc()).all()
         

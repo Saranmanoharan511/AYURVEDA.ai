@@ -194,7 +194,7 @@ async def get_patient(
     return PatientResponse.model_validate(patient)
 
 
-@router.get("/patients/me/consultations", response_model=List[ConsultationResponse])
+@router.get("/patients/me/consultations", response_model=List[ConsultationWithDetails])
 async def get_my_consultations(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_patient)
@@ -213,7 +213,18 @@ async def get_my_consultations(
         Consultation.patient_id == patient.id
     ).order_by(Consultation.created_at.desc()).all()
     
-    return consultations
+    # Add patient details to each consultation
+    result = []
+    for consultation in consultations:
+        result.append(ConsultationWithDetails(
+            **consultation.to_dict(),
+            patient=patient.to_dict(),
+            doctor=None,
+            appointment=None,
+            notes=None
+        ))
+    
+    return result
 
 
 @router.get("/patients/{patient_id}/consultations", response_model=PatientWithConsultations)

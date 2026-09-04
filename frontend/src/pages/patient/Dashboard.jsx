@@ -364,6 +364,18 @@ function PatientDashboard() {
                     <p className="text-sm text-gray-600">Booked On</p>
                     <p className="font-medium">{formatDate(selectedConsultation.created_at)}</p>
                   </div>
+                  {selectedConsultation.patient && (
+                    <>
+                      <div>
+                        <p className="text-sm text-gray-600">Patient Name</p>
+                        <p className="font-medium">{selectedConsultation.patient.full_name}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">Client ID</p>
+                        <p className="font-medium">{selectedConsultation.patient.client_id}</p>
+                      </div>
+                    </>
+                  )}
                 </div>
                 {selectedConsultation.description && (
                   <div className="mt-4">
@@ -455,14 +467,16 @@ function PatientDashboard() {
                                 <p className="font-medium">{doc.original_filename}</p>
                                 <p className="text-sm text-gray-600">Generated on {formatDate(doc.generated_at)}</p>
                               </div>
-                              <a
-                                href={doc.download_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-lg transition text-sm"
-                              >
-                                Download
-                              </a>
+                              {doc.download_url && (
+                                <a
+                                  href={doc.download_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-lg transition text-sm"
+                                >
+                                  Download
+                                </a>
+                              )}
                             </div>
                           ))}
                         </div>
