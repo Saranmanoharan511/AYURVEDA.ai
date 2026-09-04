@@ -145,8 +145,30 @@ class ChunkingService:
         chunk_index = 0
         start = 0
         text_length = len(text)
+        max_iterations = 1000  # Safety limit to prevent infinite loops
+        iterations = 0
+        previous_start = -1
         
         while start < text_length and len(chunks) < self.config.max_chunks:
+            iterations += 1
+            
+            # Safety check: prevent infinite loops
+            if iterations > max_iterations:
+                logger.error(f"Chunking exceeded maximum iterations ({max_iterations}), breaking to prevent infinite loop")
+                break
+            
+            # Safety check: detect zero progress
+            if start <= previous_start:
+                logger.warning(f"Zero progress detected in chunking (start={start}, previous_start={previous_start}), forcing forward progress")
+                # Force advance by at least chunk_size to break the loop
+                start = previous_start + self.config.chunk_size
+                if start >= text_length:
+                    break
+                previous_start = start
+                continue
+            
+            previous_start = start
+            
             # Calculate end position
             end = start + self.config.chunk_size
             
@@ -164,7 +186,7 @@ class ChunkingService:
             
             chunk_text = text[start:end].strip()
             
-            # Only add if it meets minimum size
+            # Only add if it meets minimum size, but always advance start
             if len(chunk_text) >= self.config.min_chunk_size:
                 chunks.append({
                     'chunk_index': chunk_index,
@@ -173,8 +195,15 @@ class ChunkingService:
                 chunk_index += 1
             
             # Move start position with overlap
-            start = end - self.config.chunk_overlap
+            # Ensure we always make forward progress, even if chunk was too small
+            new_start = end - self.config.chunk_overlap
+            if new_start <= start:
+                # If overlap would cause zero progress, advance by chunk_size
+                start = end
+            else:
+                start = new_start
         
+        logger.debug(f"Chunking completed in {iterations} iterations with {len(chunks)} chunks")
         return chunks
     
     def chunk_with_context(
