@@ -7,7 +7,7 @@ for semantic search and RAG (Retrieval-Augmented Generation).
 
 Table Schema:
 - id: UUID primary key
-- document_id: Foreign key to patient_documents table
+- document_id: Foreign key to reports table (reports-only RAG architecture)
 - patient_id: Foreign key to patients table (for authorization)
 - consultation_id: Foreign key to consultations table (optional)
 - chunk_index: Index of the chunk within the document
@@ -17,6 +17,9 @@ Table Schema:
 - source_filename: Original filename of the source document
 - document_type: Type of document (medical_report, prescription, etc.)
 - created_at: Timestamp when chunk was created
+
+Note: Only reports are processed for AI/RAG. Patient-uploaded documents are stored
+but do not undergo chunking or embedding generation.
 """
 
 from sqlalchemy import Column, String, Integer, Text, DateTime, Float

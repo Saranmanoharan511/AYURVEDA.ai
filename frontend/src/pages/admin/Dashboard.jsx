@@ -528,13 +528,13 @@ function DLQView({ documents, onRetry, loading }) {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold text-gray-800">Failed Document Processing</h3>
-        <span className="text-sm text-gray-600">{documents.length} failed documents</span>
+        <h3 className="text-lg font-semibold text-gray-800">Failed Report Processing</h3>
+        <span className="text-sm text-gray-600">{documents.length} failed reports</span>
       </div>
 
       {documents.length === 0 ? (
         <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
-          No failed documents to process
+          No failed reports to process
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -542,7 +542,7 @@ function DLQView({ documents, onRetry, loading }) {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Patient</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Document</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Report</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Retries</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime, timedelta
 from uuid import UUID
+import json
 
 from app.db.session import get_db
 from app.core.auth import get_current_user
@@ -392,8 +393,9 @@ async def list_failed_documents(
     db: Session = Depends(get_db),
 ):
     """List failed document processing jobs (admin only)."""
-    query = db.query(PatientDocument).filter(
-        PatientDocument.processing_status == "FAILED"
+    # Updated to query reports instead of patient_documents for reports-only RAG architecture
+    query = db.query(Report).filter(
+        Report.processing_status == "FAILED"
     ).join(Patient)
     
     total = query.count()
@@ -401,16 +403,16 @@ async def list_failed_documents(
     
     failed_documents = []
     for doc in documents:
-        error_message = doc.document_metadata.get("error_message", "Unknown error") if doc.document_metadata else "Unknown error"
-        retry_count = doc.document_metadata.get("retry_count", 0) if doc.document_metadata else 0
-        last_attempt = doc.document_metadata.get("last_attempt") if doc.document_metadata else doc.updated_at
+        error_message = doc.upload_status  # Reports don't have document_metadata like patient documents
+        retry_count = 0  # Reports don't track retry count in metadata
+        last_attempt = doc.uploaded_at
         
         failed_documents.append(
             FailedDocumentProcessing(
                 document_id=doc.id,
                 patient_id=doc.patient_id,
                 patient_name=doc.patient.full_name if doc.patient else "Unknown",
-                document_type=doc.document_type,
+                document_type=doc.report_type,
                 filename=doc.original_filename,
                 error_message=error_message,
                 retry_count=retry_count,
@@ -432,9 +434,10 @@ async def retry_document_processing(
     db: Session = Depends(get_db),
 ):
     """Retry failed document processing (admin only)."""
-    document = db.query(PatientDocument).filter(
-        PatientDocument.id == document_id,
-        PatientDocument.processing_status == "FAILED"
+    # Updated to query reports instead of patient_documents for reports-only RAG architecture
+    document = db.query(Report).filter(
+        Report.id == document_id,
+        Report.processing_status == "FAILED"
     ).first()
     
     if not document:
@@ -442,15 +445,6 @@ async def retry_document_processing(
     
     # Update document status to trigger reprocessing
     document.processing_status = "PENDING"
-    if document.document_metadata:
-        document.document_metadata["retry_count"] = document.document_metadata.get("retry_count", 0) + 1
-        document.document_metadata["last_attempt"] = datetime.utcnow().isoformat()
-    else:
-        document.document_metadata = {
-            "retry_count": 1,
-            "last_attempt": datetime.utcnow().isoformat(),
-        }
-    
     db.commit()
     
     # Create audit log
@@ -458,7 +452,7 @@ async def retry_document_processing(
         actor_user_id=current_user.id,
         actor_role=current_user.role,
         action="RETRY_DOCUMENT_PROCESSING",
-        resource_type="PATIENT_DOCUMENT",
+        resource_type="REPORT",
         resource_id=document.id,
         resource_identifier=document.original_filename,
         new_values={"processing_status": "PENDING"},
@@ -477,11 +471,11 @@ async def retry_document_processing(
         message_body = {
             "document_id": str(document_id),
             "patient_id": str(document.patient_id),
-            "consultation_id": str(document.consultation_id) if document.consultation_id else None,
+            "consultation_id": str(document.consultation_id),
             "s3_object_key": document.s3_object_key,
             "original_filename": document.original_filename,
-            "document_type": document.document_type,
-            "retry_count": document.document_metadata.get("retry_count", 0) if document.document_metadata else 0
+            "document_type": document.report_type,
+            "document_source": "report"
         }
         
         sqs.send_message(

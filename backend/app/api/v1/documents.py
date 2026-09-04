@@ -132,18 +132,9 @@ async def save_document_metadata(
         db.commit()
         db.refresh(document)
         
-        # Queue document processing job (for Sprint 5)
-        try:
-            sqs_service.send_document_processing_message(
-                document_id=str(document.id),
-                patient_id=str(patient_id),
-                s3_object_key=metadata.object_key,
-                document_type=metadata.document_type,
-                consultation_id=str(metadata.consultation_id) if metadata.consultation_id else None
-            )
-        except Exception as e:
-            # Log error but don't fail the request
-            print(f"Failed to queue document processing: {str(e)}")
+        # Note: Patient documents no longer undergo AI/RAG processing
+        # Only reports are processed for RAG chunking and embeddings
+        # Patient documents are stored for download but not sent to SQS for processing
         
         return DocumentMetadataResponse(
             id=document.id,
@@ -645,14 +636,10 @@ async def search_documents(
             PatientDocument.created_at.desc()
         ).offset(search_params.offset).limit(search_params.limit).all()
         
-        # Get chunk counts for each document
-        from app.models.document_chunk import DocumentChunk
+        # Note: Patient documents no longer undergo AI/RAG processing, so chunk_count is always 0
+        # Only reports are processed for RAG chunking and embeddings
         results = []
         for doc in documents:
-            chunk_count = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == doc.id
-            ).count()
-            
             results.append(DocumentSearchResult(
                 id=doc.id,
                 patient_id=doc.patient_id,
@@ -662,7 +649,7 @@ async def search_documents(
                 upload_status=doc.upload_status,
                 processing_status=doc.processing_status,
                 created_at=doc.created_at,
-                chunk_count=chunk_count
+                chunk_count=0  # Patient documents are not processed for RAG
             ))
         
         return DocumentSearchResponse(
