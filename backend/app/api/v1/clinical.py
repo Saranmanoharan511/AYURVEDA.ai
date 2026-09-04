@@ -513,7 +513,7 @@ async def update_consultation_status(
     return consultation
 
 
-@router.get("/doctors/me/consultations", response_model=List[ConsultationResponse])
+@router.get("/doctors/me/consultations", response_model=List[ConsultationWithDetails])
 async def get_doctor_consultations(
     status_filter: str = None,
     db: Session = Depends(get_db),
@@ -536,7 +536,19 @@ async def get_doctor_consultations(
     
     consultations = query.order_by(Consultation.created_at.desc()).all()
     
-    return consultations
+    # Add patient details to each consultation
+    result = []
+    for consultation in consultations:
+        patient = db.query(Patient).filter(Patient.id == consultation.patient_id).first()
+        result.append(ConsultationWithDetails(
+            **consultation.to_dict(),
+            patient=patient.to_dict() if patient else None,
+            doctor=None,
+            appointment=None,
+            notes=None
+        ))
+    
+    return result
 
 
 # ============ Appointment Endpoints ============

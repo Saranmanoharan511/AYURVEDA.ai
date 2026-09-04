@@ -4,7 +4,7 @@ function PublicHome() {
       <div className="container mx-auto px-4 py-16">
         <div className="text-center">
           <h1 className="text-5xl font-bold text-emerald-800 mb-6">
-            Ayurveda AI Platform
+            Agamitra.ai
           </h1>
           <p className="text-xl text-emerald-700 mb-12">
             AI-Assisted Ayurveda Consultation Platform

@@ -7,6 +7,7 @@ function DoctorDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [consultations, setConsultations] = useState([]);
+  const [doctor, setDoctor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -24,8 +25,18 @@ function DoctorDashboard() {
   const [loadingDocuments, setLoadingDocuments] = useState(false);
 
   useEffect(() => {
+    fetchDoctorData();
     fetchConsultations();
   }, [filter]);
+
+  const fetchDoctorData = async () => {
+    try {
+      const response = await apiClient.get('/api/v1/clinical/doctors/me');
+      setDoctor(response.data);
+    } catch (err) {
+      console.error('Error fetching doctor data:', err);
+    }
+  };
 
   const fetchConsultations = async () => {
     try {
@@ -140,6 +151,20 @@ function DoctorDashboard() {
     }
   };
 
+  const handleMarkAsComplete = async (consultation) => {
+    try {
+      await apiClient.put(`/api/v1/clinical/consultations/${consultation.id}/status`, {
+        consultation_status: 'CONSULTATION_COMPLETED'
+      });
+      alert('Consultation marked as completed!');
+      setShowConsultationModal(false);
+      fetchConsultations();
+    } catch (err) {
+      alert('Failed to mark consultation as complete');
+      console.error('Error marking consultation as complete:', err);
+    }
+  };
+
   const getStatusColor = (status) => {
     const colors = {
       'APPOINTMENT_BOOKED': 'bg-yellow-100 text-yellow-800',
@@ -166,6 +191,9 @@ function DoctorDashboard() {
 
   const getFilteredConsultations = () => {
     if (filter === 'all') return consultations;
+    if (filter === 'CONSULTATION_COMPLETED') {
+      return consultations.filter(c => c.consultation_status === 'CONSULTATION_COMPLETED' || c.consultation_status === 'CONSULTATION_CLOSED');
+    }
     return consultations.filter(c => c.consultation_status === filter);
   };
 
@@ -196,7 +224,11 @@ function DoctorDashboard() {
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-3xl font-bold text-blue-800 mb-2">Doctor Dashboard</h1>
+              <h1 className="text-3xl font-bold text-blue-800 mb-2">
+                {doctor?.name && doctor?.qualifications 
+                  ? `${doctor.name}, ${doctor.qualifications}` 
+                  : 'Doctor Dashboard'}
+              </h1>
               <p className="text-gray-600">Manage your consultations and patients</p>
             </div>
             <button
@@ -271,13 +303,12 @@ function DoctorDashboard() {
                 >
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800">{consultation.reason}</h3>
+                      <h3 className="font-semibold text-gray-800">
+                        {consultation.patient?.full_name || 'Unknown Patient'}
+                      </h3>
                       <p className="text-sm text-gray-600">
                         Booked on {formatDate(consultation.created_at)}
                       </p>
-                      {consultation.description && (
-                        <p className="text-sm text-gray-600 mt-1">{consultation.description}</p>
-                      )}
                     </div>
                     <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(consultation.consultation_status)}`}>
                       {consultation.consultation_status.replace(/_/g, ' ')}
@@ -491,6 +522,14 @@ function DoctorDashboard() {
                     <p className="font-medium">{selectedConsultation.consultation_status.replace(/_/g, ' ')}</p>
                   </div>
                   <div>
+                    <p className="text-sm text-gray-600">Patient Name</p>
+                    <p className="font-medium">{selectedConsultation.patient?.full_name || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Client ID</p>
+                    <p className="font-medium">{selectedConsultation.patient?.client_id || 'N/A'}</p>
+                  </div>
+                  <div>
                     <p className="text-sm text-gray-600">Reason</p>
                     <p className="font-medium">{selectedConsultation.reason}</p>
                   </div>
@@ -527,6 +566,14 @@ function DoctorDashboard() {
                 >
                   Send Documents
                 </button>
+                {(selectedConsultation.consultation_status === 'MEETING_SCHEDULED' || selectedConsultation.consultation_status === 'WAITING_FOR_CONSULTATION') && (
+                  <button
+                    onClick={() => handleMarkAsComplete(selectedConsultation)}
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white px-4 py-3 rounded-lg transition font-medium"
+                  >
+                    Mark as Complete
+                  </button>
+                )}
               </div>
 
               {/* Tab Navigation */}
